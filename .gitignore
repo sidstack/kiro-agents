@@ -1,0 +1,7 @@
+/target/
+/dist/
+node_modules/
+*.log
+probes/out/
+.kiro-agents/
+.DS_Store
