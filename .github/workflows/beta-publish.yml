@@ -1,0 +1,30 @@
+name: Publish beta
+on:
+  workflow_run:
+    workflows: [Branch beta]
+    types: [completed]
+permissions:
+  contents: read
+concurrency:
+  group: publish-beta-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch != 'main' && (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      # Only trusted default-branch code runs with a write token. Never check out
+      # the triggering branch or execute/extract anything from its artifact here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Verify provenance and publish a prerelease without changing latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BETA_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python3 scripts/publish_beta.py --run-id "$BETA_RUN_ID"

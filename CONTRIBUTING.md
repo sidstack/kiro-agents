@@ -40,3 +40,9 @@ Use `fix(deps):` for dependency changes shipped in the executable so Release Ple
 proposes a patch release. For a batch that only changes CI/development tooling, use a
 `chore(deps):` squash title to avoid an unnecessary application release. The generated
 release PR remains separate: merge it when ready to publish the next binary.
+
+Branch pushes also run the Branch beta workflow: the full integration suite and
+RustSec audit, followed by all six PTY scripts against the extracted optimized beta
+binary. Same-repository builds publish GitHub prereleases for manual testing before
+merge. Fork PR builds provide read-only artifacts. See `docs/RELEASING.md` for beta
+versioning, installation and the separate stable release process.

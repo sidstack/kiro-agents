@@ -10,6 +10,11 @@ MVP v3 is the product iteration; sessions still launch Kiro’s V2 engine.
 
 ## Install
 
+For pre-merge testing, branch CI publishes versioned `-beta.RUN.ATTEMPT` binaries
+as GitHub prereleases after integration tests and dependency auditing. Betas have
+the same installation steps; see [branch beta builds](docs/RELEASING.md#branch-beta-binaries).
+Stable releases remain the default for normal installation.
+
 Download the Linux x86_64 archive and `SHA256SUMS` from [GitHub Releases](https://github.com/sidstack/kiro-agents/releases). Verify the checksum, extract it, and install the binary:
 
 ```sh
