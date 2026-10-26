@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+      actions: write
       issues: write
       pull-requests: write
     outputs:
@@ -36,9 +37,22 @@ jobs:
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
         id: release
         with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      - name: Start checks on generated release PRs
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        run: |
+          python3 - <<'PYPRS'
+          import json, os, subprocess
+          for pr in json.loads(os.environ['RELEASE_PRS']):
+              branch = pr['headBranchName']
+              for workflow in ['checks.yml', 'security.yml']:
+                  subprocess.run(['gh', 'workflow', 'run', workflow, '--ref', branch], check=True)
+          PYPRS
   binary:
     needs: version
     if: needs.version.outputs.released == 'true'

@@ -10,8 +10,7 @@ MVP v3 is the product iteration; sessions still launch Kiro’s V2 engine.
 
 ## Install
 
-Download the Linux x86_64 archive and `SHA256SUMS` from this repository's GitHub
-Releases page. Verify the checksum, extract it, and install the binary:
+Download the Linux x86_64 archive and `SHA256SUMS` from [GitHub Releases](https://github.com/sidstack/kiro-agents/releases). Verify the checksum, extract it, and install the binary:
 
 ```sh
 sha256sum --check SHA256SUMS

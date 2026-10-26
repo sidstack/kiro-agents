@@ -27,13 +27,12 @@ Settings → Actions → General, permit GitHub Actions to create pull requests.
 The workflow uses the repository's built-in GITHUB_TOKEN; no crates.io or npm
 credentials are needed. This project does not publish to either registry.
 
-GitHub does not trigger other workflows for PRs/tags created with GITHUB_TOKEN.
-The binary build is therefore called directly in the release workflow, using
-Release Please's tag output rather than waiting for a tag-push workflow.
-For release-PR checks, run Checks and Security manually on the generated PR
-branch (both support workflow_dispatch), or configure an optional GitHub App/PAT
-as RELEASE_PLEASE_TOKEN so PR checks run automatically. Main and exact-tag
-release gates run regardless; no untested binary is attached.
+Bot-created PR events can require approval, and token-created tag pushes do not
+start ordinary tag workflows. The release workflow explicitly dispatches Checks
+and Security on its generated PR branch using the built-in GITHUB_TOKEN. GitHub
+permits workflow_dispatch from that token, so no personal access token is needed.
+The binary job is called directly using Release Please's tag output. See
+[GitHub's workflow trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
 
 ## Release gates and artifacts
 
