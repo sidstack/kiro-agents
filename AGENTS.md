@@ -183,3 +183,10 @@ Attached frontend navigation uses Ctrl+G to return to the board. This explicit u
 choice replaces Kiro's native Ctrl+G crew shortcut while attached. Tmux retains its
 Ctrl+B prefix. Left Arrow always passes through: do not infer editor emptiness from
 keystrokes or parse terminal output to implement an empty-input shortcut.
+
+Frontend lifecycle: keep Crossterm's use-dev-tty backend and explicit terminal-hangup
+exit checks; its mio backend can spin inside poll after PTY EOF/EIO. Tests must prove
+closed pane frontends exit, not only that tmux removed a pane. The bounded CPU/PTY/host
+EOF regression runs in make check and against extracted betas. Native title ownership
+may use a bounded, start-time-checked descendant parent chain; main-thread children
+lists alone miss Kiro's runtime-thread launcher chain. See docs/INCIDENT-2026-10-26-CPU.md.

@@ -379,7 +379,7 @@ pub fn run(dir: &Path) -> Result<()> {
     let mut screen = Screen::open()?;
     let mut last_refresh = Instant::now();
     let mut dirty = true;
-    while !signals.interrupted.load(Ordering::Relaxed) {
+    while !signals.interrupted.load(Ordering::Relaxed) && terminal_connected()? {
         if let Some(result) = refresh.as_ref().and_then(|task| task.try_recv().ok()) {
             refresh = None;
             dirty |= app.apply_rows(result);
@@ -498,6 +498,26 @@ pub fn run(dir: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+// A closed PTY is a frontend exit, never an input event. Check separately from
+// Crossterm so HUP-only readiness cannot turn its timed poll into a busy loop.
+fn terminal_connected() -> std::io::Result<bool> {
+    let mut descriptor = libc::pollfd {
+        fd: libc::STDIN_FILENO,
+        events: 0,
+        revents: 0,
+    };
+    // SAFETY: descriptor is initialized and borrowed only for this nonblocking poll.
+    let result = unsafe { libc::poll(&mut descriptor, 1, 0) };
+    if result < 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::Interrupted {
+            return Ok(true);
+        }
+        return Err(error);
+    }
+    Ok(descriptor.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) == 0)
 }
 
 #[cfg(test)]

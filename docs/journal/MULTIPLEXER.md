@@ -60,3 +60,12 @@ retain Ctrl+B d for workspace detach. Empty-editor Left Arrow was explicitly def
 Pi has getEditorText(), but this native passthrough does not have an equivalent input
 state signal. Arrow bytes stay unchanged. Ctrl+G now supersedes Kiro's crew shortcut
 while attached.
+
+Incident/naming follow-up: corrected closed-PTY input spinning and verified that
+closed tmux panes leave no live frontends. A bounded lifecycle/CPU regression also
+checks attached terminal loss, intentional detached-host idleness and host EOF
+without replay. Naming now verifies the full native lock owner's parent chain,
+covering runtime-thread launchers; the prior SQLite-only inference was incorrect
+for the observed installation. Local `make check` passed (81 Rust tests, eleven
+PTY scenarios and packaging tests), as did strict `make audit`. See the incident
+report and findings; real authenticated/browser acceptance remains manual.

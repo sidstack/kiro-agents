@@ -3,8 +3,10 @@
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
+import threading
 import tty
 
 # Agent discovery fixtures for the picker flows. The fixture file holds
@@ -33,6 +35,26 @@ if sys.argv[1:3] == ["agent", "list"]:
     sys.exit(0)
 
 assert sys.argv[1:4] == ["chat", "--v2", "--tui"], sys.argv
+depth = int(os.environ.get("KIRO_AGENTS_FAKE_DELEGATE_DEPTH", "0"))
+if depth:
+    assert 0 < depth <= 3
+    child_env = dict(os.environ, KIRO_AGENTS_FAKE_DELEGATE_DEPTH=str(depth - 1),
+                     KIRO_AGENTS_FAKE_ROOT_PID=os.environ.get("KIRO_AGENTS_FAKE_ROOT_PID", str(os.getpid())))
+    result = [1]
+
+    def delegate():
+        result[0] = subprocess.call([sys.executable, __file__, *sys.argv[1:]], env=child_env)
+
+    # Reproduce launchers that spawn on runtime threads: the main thread's
+    # /proc/<pid>/task/<pid>/children does not expose this child.
+    worker = threading.Thread(target=delegate)
+    worker.start()
+    worker.join()
+    sys.exit(result[0])
+pid_dir = os.environ.get("KIRO_AGENTS_FAKE_NATIVE_PID_DIR")
+if pid_dir:
+    from pathlib import Path
+    Path(pid_dir, os.environ.get("KIRO_AGENTS_FAKE_ROOT_PID", str(os.getpid()))).write_text(str(os.getpid()))
 assert "--trust-all-tools" not in sys.argv
 assert "--resume-id" not in sys.argv
 agent = sys.argv[sys.argv.index("--agent") + 1] if "--agent" in sys.argv else None

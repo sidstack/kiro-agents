@@ -53,6 +53,7 @@ def main():
             env.pop(key, None)
         client = None
         master = None
+        pane_processes = {}
 
         def drain():
             while select.select([master], [], [], 0)[0]:
@@ -99,7 +100,21 @@ def main():
             return os.readlink(f'/proc/{pane_pid}/cwd')
 
         def panes():
-            return tmux('list-panes', '-a', '-F', '#{pane_id}').splitlines()
+            result = tmux('list-panes', '-a', '-F', '#{pane_id}').splitlines()
+            for pane in result:
+                pid = int(tmux('display-message', '-p', '-t', pane, '#{pane_pid}'))
+                try:
+                    pane_processes[pid] = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
+                except FileNotFoundError:
+                    pass
+            return result
+
+        def frontend_alive(pid, start):
+            try:
+                fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+                return fields[0] != 'Z' and fields[19] == start and os.readlink(f'/proc/{pid}/exe') == str(binary)
+            except FileNotFoundError:
+                return False
 
         def context(pane, path=socket):
             value = tmux('display-message', '-p', '-t', pane, '#{socket_path},#{pid},0', path=path).strip()
@@ -232,7 +247,11 @@ def main():
             tmux('select-window', '-t', 'test:0')
             tmux('send-keys', '-t', first, 'C-g')
             wait(lambda: 'Kiro sessions' in capture(first), 'session detach did not return to board')
+            panes()  # register every private pane before testing closure
+            second_pid = int(tmux('display-message', '-p', '-t', second, '#{pane_pid}'))
+            second_start = pane_processes[second_pid]
             tmux('kill-pane', '-t', second)
+            wait(lambda: not frontend_alive(second_pid, second_start), 'closed pane left a live frontend')
             after = {row['id']: row for row in json.loads(cli('status', '--json'))}
             for identifier, pid in original_pids.items():
                 assert after[identifier]['state'] == 'live' and after[identifier]['pid'] == pid
@@ -261,6 +280,19 @@ def main():
             if foreign.exists():
                 tmux('kill-server', path=foreign, check=False)
             subprocess.run([str(binary), 'shutdown'], env=env, capture_output=True, timeout=10)
+            deadline = time.monotonic() + 1.5
+            leaked = []
+            while time.monotonic() < deadline:
+                leaked = [pid for pid, start in pane_processes.items() if frontend_alive(pid, start)]
+                if not leaked:
+                    break
+                time.sleep(0.02)
+            # Only a still-identical frontend launched on this private server is
+            # eligible for emergency cleanup; never signal managed Kiro children.
+            for pid in leaked:
+                if frontend_alive(pid, pane_processes[pid]):
+                    os.kill(pid, signal.SIGKILL)
+            assert not leaked, f'private workspace leaked frontends (cleaned up): {leaked}'
 
 
 if __name__ == '__main__':
