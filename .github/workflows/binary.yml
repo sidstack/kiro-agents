@@ -1,0 +1,49 @@
+name: Release binary
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Existing release tag to build
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild (for example v0.3.0)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: binary-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  linux-x86_64:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      # Check the exact tagged source, including manually retried releases.
+      - run: make check
+      - run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: cargo audit --deny warnings
+      - name: Build and package tagged binary
+        run: python3 scripts/package_release.py --tag "$RELEASE_TAG"
+      - name: Attach binary and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/SHA256SUMS --clobber

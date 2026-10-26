@@ -1,4 +1,7 @@
-# Verified Kiro CLI integration surface
+# Kiro CLI integration reference
+
+Local validation: Kiro CLI 2.32.0; see [FINDINGS.md](FINDINGS.md) for observed facts
+and blocked probes. The reference below is not a promise of locally tested behavior.
 
 Research snapshot: 2026-10-16. Kiro CLI current line referenced by docs: CLI 2.31.x / V3
 harness, CLI v1.26+ agent-name-as-positional behavior. Kiro CLI is **closed source**

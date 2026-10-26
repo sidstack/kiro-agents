@@ -1,6 +1,7 @@
 /target/
 /dist/
 node_modules/
+__pycache__/
 *.log
 probes/out/
 .kiro-agents/

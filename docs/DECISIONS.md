@@ -14,7 +14,8 @@
 | 10 | Kiro's own multi-agent features stay inside Kiro (`/spawn`, subagents, `Ctrl+G` crew monitor) | our value is cross-directory persistent sessions, not a second orchestration layer | locked |
 | 11 | Status inferred from child liveness + opt-in Hooks + `.lock`/`.jsonl` + idle timer | no runtime API to ask; Hooks are Kiro's sanctioned event channel | locked |
 | 12 | Never write to `~/.kiro/` or `.kiro/` except one opt-in telemetry Hook file | Kiro's own guidance: session storage is server-owned | locked |
-| 13 | Plan docs only in this pass; P0 probes before any product code | several load-bearing assumptions are third-party reconstructions or undocumented | current state |
+| 13 | Initial pass was plan docs only; probe before implementing dependent behavior | several load-bearing assumptions are third-party reconstructions or undocumented | superseded by user request for minimal V2 MVP; auth-dependent features deferred |
+| 14 | Build a V2-only create/attach/detach/stop slice for feedback first | validate native PTY interaction before broader product work; see MVP.md | current scope |
 
 ## Revisit when
 

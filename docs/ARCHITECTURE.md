@@ -1,5 +1,7 @@
 # Architecture
 
+Target architecture. The implemented V2 proof of concept is scoped in [MVP.md](MVP.md).
+
 ```text
 frontend Pi analogue: kiro-agents (short-lived process, owns your terminal)
   original board view / attach view
@@ -115,7 +117,7 @@ Host state under `~/.kiro-agents/host/` (override `PI`-style: `KIRO_AGENTS_HOME`
 | `registry.json` | Session metadata only: id, kiro session id, cwd, agent profile, generation, name, state, unread, lastError, draft key |
 | `drafts/<sha256(session-id)>` | Draft editor text per session, never inside the registry or a status response |
 | `events/` | Optional Hook NDJSON spool |
-| `host.log` | Child stderr and host diagnostics |
+| `host.log` | Host diagnostics only; never child stdout/stderr, environment, or transcript |
 
 Ownership and safety, copied from pi-codex-agents because it is correct:
 

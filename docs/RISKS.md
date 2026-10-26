@@ -84,7 +84,8 @@ timeout window; everything else is forwarded unchanged.
 Children inherit auth from `KIRO_HOME`; Kiro logs can contain file paths, code, and command
 output.
 
-**Mitigation.** Host never logs child env. `host.log` redacts token-shaped strings. Registry
+**Mitigation.** Host never logs child env or child stdout/stderr. Any host diagnostics must also
+exclude transcript text and auth URLs; token-pattern redaction alone is insufficient. Registry
 stores metadata only, never draft text, never transcript text. Our socket is `0600`. Docs
 tell users not to attach `host.log` to bug reports unredacted.
 
