@@ -17,7 +17,7 @@
 - [x] Publish verified artifacts from trusted default-branch code only.
 - [x] Keep fork runs read-only and stable releases latest.
 - [x] Enable hosted workflows and beta integration as a merge requirement.
-- [ ] Produce and verify a beta for the dependency PR before merging it.
+- [x] Produce and verify a beta for the dependency PR before merging it.
 
 Work split: two Pi swarm workers using Strata Qwen 3.8 implement beta packaging
 and installed-binary integration tests; the coordinator owns workflow integration,
@@ -28,3 +28,8 @@ seven installed-archive and five publication boundary tests passed. An isolated 
 clone built `0.3.1-beta.999999.1`; its checksum/version checks and all six PTY scenarios
 against the extracted optimized binary passed. Hosted rollout is tracked in PR #10;
 dependency preview validation is tracked in PR #9.
+
+Hosted proof: dependency branch commit `944de08cf5943e9496543ce10f30b6293674857b`
+published `v0.3.1-beta.5.1` after all branch integration/audit gates passed.
+The public archive was downloaded and its checksum, member allowlist and executable
+identity verified. Latest stable remained `v0.3.0`. The dependency PR stays unmerged.
