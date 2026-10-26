@@ -10,6 +10,27 @@ MVP v3 is the product iteration; sessions still launch Kiro’s V2 engine.
 
 ## Install
 
+Install the latest stable Linux x86_64 binary without Rust or sudo:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sidstack/kiro-agents/main/install.sh | sh
+```
+
+Select an exact stable or beta release, or choose an installation directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sidstack/kiro-agents/main/install.sh | sh -s -- --version v0.3.1-beta.15.1
+```
+
+Pass `--install-dir DIRECTORY` or `--uninstall` after `sh -s --` in the same command.
+From a source checkout, use `sh install.sh` with those flags directly.
+
+The installer requires Linux x86_64/glibc 2.35+, curl, tar and coreutils. It checks
+the release checksum, archive contents and executable version before atomically
+replacing the binary. Re-running upgrades it; uninstall removes only the executable.
+Hosts, sessions and Kiro configuration are left running and unchanged. Kiro CLI must
+be installed and authenticated separately. The manual download method follows.
+
 For pre-merge testing, branch CI publishes versioned `-beta.RUN.ATTEMPT` binaries
 as GitHub prereleases after integration tests and dependency auditing. Betas have
 the same installation steps; see [branch beta builds](docs/RELEASING.md#branch-beta-binaries).

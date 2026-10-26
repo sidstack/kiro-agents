@@ -20,6 +20,7 @@ history resume, cross-generation migration, hooks or Kiro V3 launching are shipp
   `docs/journal/MVP-V3.md` records completed tasks and milestones.
 - `.github/` — checks, security/release workflows, Dependabot and contribution templates.
 - `scripts/package_release.py` — tagged binary packaging and checksums.
+- `install.sh` — verified release installation, explicit versions/betas and uninstall.
 - `probes/` — opt-in probe scripts and output; never shipped in the package.
 
 Use `../pi-codex-agents` as a dashboard interaction/parity reference when available.
@@ -155,3 +156,7 @@ Kiro titles, then a bounded first-Prompt extractive title, then project/agent. N
 by newest session in a directory, write native titles, or parse terminal traffic for names.
 `KIRO_AGENTS_AUTO_NAME=auto|kiro|off` controls read-only enrichment at host startup;
 manual names remain available. See `docs/SESSION-NAMES.md` for bounds and compatibility.
+
+Installer changes must retain checksum/archive/version verification and atomic replacement,
+never require sudo or restart hosts. Tests use local mocked release downloads and a temporary
+installation directory; keep the default latest channel stable, with explicit beta selection.

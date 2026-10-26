@@ -102,6 +102,15 @@ unreleased branch name. The packager refuses a tag/version/HEAD mismatch.
 
 ## Install a binary
 
+The root `install.sh` downloads latest stable or `--version VERSION` directly from
+GitHub Releases, checks SHA256SUMS and a regular-file archive allowlist, verifies
+`--version`, then atomically installs into ~/.local/bin (override with --install-dir).
+It supports exact beta tags and --uninstall, never uses sudo and never restarts a
+host or modifies Kiro state. It rejects unsupported architectures, musl and glibc
+older than the documented build baseline. See README for the one-line command.
+Installer regression tests use mocked HTTPS release fixtures; publication tests
+also exercise the installer against a real downloaded release in a temporary prefix.
+
 Download the archive and SHA256SUMS from the repository's GitHub Releases page.
 Use a tagged release, not a workflow artifact. For example, for v0.3.0:
 
