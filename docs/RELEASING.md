@@ -90,3 +90,17 @@ Uninstall the executable you installed: cargo users run `cargo uninstall
 kiro-agents`; binary users remove ~/.local/bin/kiro-agents. Removing a frontend
 binary leaves background sessions and wrapper metadata intact. Stop owned
 sessions explicitly with `kiro-agents shutdown` first when that is your intent.
+
+## Local validation of the release setup (2026-10-26)
+
+The complete check suite passed, including 44 Rust tests, six PTY scripts and
+two packaging tests. Actionlint 1.7.12 and the official Release Please JSON
+schema accepted the workflows/configuration. Cargo's source-package allowlist
+excluded probes, build output, caches and logs.
+
+In an isolated clone, a temporary test tag exercised the complete packager:
+optimized binary build, Cargo/tag/binary identity checks, archive construction,
+checksum verification, extraction, `--version`, and the extracted binary's
+PTY handoff regression. All passed. No tag or release was published by this
+local check. Hosted automation still requires a GitHub remote and the setup
+permissions above.

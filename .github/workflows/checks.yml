@@ -31,6 +31,8 @@ jobs:
           if not re.fullmatch(pattern, os.environ['PR_TITLE']):
               sys.exit('Use a Conventional Commit PR title, for example feat: add project selection')
           PYTITLE
+      - name: Lint GitHub workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - run: make check
       - name: Inspect source package
         run: cargo package --locked --list

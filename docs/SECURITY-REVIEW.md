@@ -5,8 +5,8 @@
 | Check | Scope | Result |
 | --- | --- | --- |
 | cargo-audit 0.22.2 | Entire Cargo.lock, including development and target-specific dependencies (155 crates) | 0 known vulnerabilities; no advisory warnings |
-| Trivy filesystem vulnerability scan | Cargo.lock | 0 known vulnerabilities |
-| Trivy secret scan | Working tree, excluding .git, target and ignored probe output | 0 detected secrets |
+| Trivy 0.76.1 filesystem vulnerability scan | Cargo.lock | 0 known vulnerabilities |
+| Trivy 0.76.1 secret scan | Working tree, excluding .git, target and ignored probe output | 0 detected secrets |
 
 RustSec database: 1,378 advisories, commit
 `a78282a1414d6c28cc228c4eae3570451affb0dc` (updated 2026-10-26).
