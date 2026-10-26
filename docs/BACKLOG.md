@@ -63,6 +63,17 @@ Goal: type words or a fuzzy query into a dashboard quick-open/search surface, fi
 matching sessions across their actual conversation text, and choose one to attach or
 resume. This means local search, not a dependency on an OpenSearch service.
 
+### Prefer native capability when it meets the workflow
+
+Before building a wrapper-owned index, probe Kiro's native resume picker and V3
+`/sessions` / `--sessions`. Current official session-management documentation says
+V3's dashboard searches indexed local V2/V3 conversation content; the current wrapper
+still launches V2 and must not silently switch engines. Verify whether invoking a
+native picker inside a managed pane is sufficient, which generations it can resume,
+and what a wrapper-level cross-pane quick-open adds. Reuse native controls when they
+meet the requirement rather than duplicating their storage/indexing implementation.
+Reference: https://kiro.dev/docs/cli/chat/session-management/ .
+
 ### Search and indexing milestone
 
 - Search titles, project paths, agent names and identifiers, plus actual user and
