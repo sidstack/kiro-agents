@@ -54,3 +54,4 @@ jobs:
             dist/beta.json
           if-no-files-found: error
           retention-days: 14
+          overwrite: true
