@@ -35,7 +35,7 @@ if [ "$uninstall" -eq 1 ]; then
     printf 'Removed %s/kiro-agents; existing hosts and sessions are unchanged.\n' "$install_dir"
     exit 0
 fi
-for dependency in curl tar sha256sum mktemp install mv cmp sort awk grep uname getconf; do
+for dependency in curl tar sha256sum mktemp install mv cmp sort awk grep uname getconf cat sleep; do
     command -v "$dependency" >/dev/null 2>&1 || fail "Missing required command: $dependency"
 done
 [ "$(uname -s)" = Linux ] || fail 'Only Linux release binaries are available'
@@ -59,6 +59,27 @@ fetch() {
     curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
         --retry 3 --connect-timeout 10 --max-time 120 "$@"
 }
+# GitHub can publish a release record before CI attaches its assets. Retry only
+# missing assets; other download failures keep the existing executable intact.
+fetch_release_asset() {
+    asset_url=$1
+    asset_file=$2
+    asset_attempt=0
+    while :; do
+        if download_status=$(fetch --output "$asset_file" --write-out '%{http_code}' "$asset_url" 2> "$workspace/download-error"); then
+            return 0
+        fi
+        if [ "$download_status" != 404 ] || [ "$asset_attempt" -ge 18 ]; then
+            cat "$workspace/download-error" >&2
+            return 1
+        fi
+        if [ "$asset_attempt" -eq 0 ]; then
+            printf 'Release assets are not attached yet; waiting up to three minutes for this asset...\n' >&2
+        fi
+        asset_attempt=$((asset_attempt + 1))
+        sleep 10
+    done
+}
 if [ -z "$requested_version" ]; then
     latest_url=$(fetch --head --output /dev/null --write-out '%{url_effective}' "$repository/releases/latest") || fail 'Cannot resolve latest stable release'
     release_tag=${latest_url##*/}
@@ -66,10 +87,13 @@ else
     case "$requested_version" in v*) release_tag=$requested_version ;; *) release_tag="v$requested_version" ;; esac
 fi
 printf '%s\n' "$release_tag" | LC_ALL=C grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$' || fail 'Invalid release version'
+if [ -n "$requested_version" ]; then
+    fetch --head --output /dev/null "$repository/releases/tag/$release_tag" || fail "Release $release_tag is unavailable"
+fi
 archive="kiro-agents-$release_tag-x86_64-unknown-linux-gnu.tar.gz"
 prefix=${archive%.tar.gz}
-fetch --output "$workspace/$archive" "$repository/releases/download/$release_tag/$archive" || fail "Cannot download $release_tag binary"
-fetch --output "$workspace/SHA256SUMS" "$repository/releases/download/$release_tag/SHA256SUMS" || fail 'Cannot download release checksums'
+fetch_release_asset "$repository/releases/download/$release_tag/$archive" "$workspace/$archive" || fail "Cannot download $release_tag binary"
+fetch_release_asset "$repository/releases/download/$release_tag/SHA256SUMS" "$workspace/SHA256SUMS" || fail 'Cannot download release checksums'
 digest=$(awk -v name="$archive" '$2 == name { n++; digest=$1 } END { if (n != 1) exit 1; print digest }' "$workspace/SHA256SUMS") || fail 'Missing or duplicate archive checksum'
 printf '%s\n' "$digest" | LC_ALL=C grep -Eq '^[0-9a-f]{64}$' || fail 'Malformed release checksum'
 (cd "$workspace" && printf '%s  %s\n' "$digest" "$archive" | sha256sum --check --status -) || fail 'Release checksum verification failed'
@@ -91,4 +115,8 @@ mv -fT -- "$staged_binary" "$install_dir/kiro-agents"
 staged_binary=''
 printf 'Installed %s to %s/kiro-agents\n' "$release_tag" "$install_dir"
 case ":${PATH:-}:" in *":$install_dir:"*) ;; *) printf 'Add %s to your PATH.\n' "$install_dir" ;; esac
+selected_binary=$(command -v kiro-agents || true)
+if [ -n "$selected_binary" ] && [ "$selected_binary" != "$install_dir/kiro-agents" ]; then
+    printf 'Your PATH currently selects %s. Run %s/kiro-agents directly or put its directory first in PATH.\n' "$selected_binary" "$install_dir"
+fi
 printf 'Run kiro-agents doctor. Install/authenticate Kiro CLI separately. Existing hosts are unchanged.\n'
