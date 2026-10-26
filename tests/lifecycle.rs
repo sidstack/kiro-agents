@@ -290,6 +290,6 @@ fn rename_is_metadata_only_persists_and_old_registries_remain_readable() {
     ));
     assert!(harness.rows()[0].name.is_none());
     let legacy: SessionInfo = serde_json::from_str(r#"{"id":"old","cwd":"/tmp/project","agent":null,"generation":"v2","pid":null,"state":"exited","exit_code":0,"notice":null}"#).unwrap();
-    assert_eq!(legacy.display_name(), "project · Kiro default");
+    assert_eq!(legacy.display_name(), "project · Kiro default · #old");
     assert!(legacy.name.is_none() && legacy.title.is_none());
 }

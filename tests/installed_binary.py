@@ -25,7 +25,7 @@ EXECUTABLE = 'kiro-agents'
 DOCS = ('LICENSE', 'README.md', 'CHANGELOG.md')
 SCRIPTS = ('terminal_smoke.py', 'board_smoke.py', 'board_errors.py',
            'board_handoff.py', 'board_ack.py', 'board_picker.py',
-           'board_search.py', 'board_naming.py')
+           'board_search.py', 'board_naming.py', 'naming_upgrade.py')
 MODES = {EXECUTABLE: 0o755, **{doc: 0o644 for doc in DOCS}}
 VERSION_RE = re.compile(r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)'
                         r'(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z')

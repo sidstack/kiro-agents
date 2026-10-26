@@ -41,7 +41,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
                 board.query
             )),
         ]))
-        .block(Block::bordered().title("Kiro sessions · MVP v3")),
+        .block(Block::bordered().title(format!("Kiro sessions · v{}", env!("CARGO_PKG_VERSION")))),
         areas[0],
     );
     let visible = board.visible_indices();
@@ -306,6 +306,7 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+            .replace(env!("CARGO_PKG_VERSION"), "<version>")
     }
 
     fn directory() -> DirPicker {

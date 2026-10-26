@@ -2,7 +2,7 @@
 
 The board displays a task name first, then agent, generation, wrapper ID and directory.
 Names follow this order: explicit wrapper name, verified native Kiro title, a short
-first-user-message title, then directory/agent. IDs remain visible to distinguish
+first-user-message title, then directory/agent plus the unique wrapper ID. IDs remain visible to distinguish
 sessions that share the same directory or agent.
 
 Use F2 to edit a selected session's name. Enter saves; an empty name restores automatic
@@ -14,13 +14,18 @@ kiro-agents rename SESSION_ID 'Investigate agent discovery'
 kiro-agents rename SESSION_ID --clear
 ```
 
-Manual names are wrapper metadata, limited to 80 characters with no control characters.
-They survive host restarts and never rewrite Kiro's own title or session files.
+Manual names are shared persistent wrapper metadata in `KIRO_AGENTS_HOME/names.json`,
+limited to 80 characters with no control characters. The store has its own format version; unknown versions are never overwritten.
+Updates are locked, atomic and private (0600). They survive host restarts and never rewrite the daemon registry or
+Kiro's own files. All updated frontends using that same wrapper state see the names.
+F2 and CLI rename work with older live hosts without requiring a new RPC or restart.
+Clearing a name explicitly restores automatic/fallback labels, including an override
+previously supplied by a newer host.
 
 Automatic naming is an optional read-only feature. Set `KIRO_AGENTS_AUTO_NAME=auto`
-(default), `kiro` (native titles only), or `off` before starting the host. Changing a
-running host's feature configuration requires an explicit host restart at a convenient
-time; updating the frontend never stops existing sessions. The feature keeps no child
+(default), `kiro` (native titles only), or `off` for the frontend. The frontend can enrich
+older hosts' metadata read-only without replacing the host. Host-side configuration is
+still inherited at host startup; updating the frontend never stops existing sessions. The feature keeps no child
 processes, open files, models or background tasks to clean up on host close.
 
 Native titles are accepted only when one fresh lock matches the owned live child PID,
@@ -38,9 +43,14 @@ required. Auto-labels containing URLs or common credential prefixes are rejected
 or logged. Unsupported SQLite-only session layouts fall back without inspecting the
 auth database or guessing a session identity.
 
-New naming fields are optional on the wire and in old registries. An older running
-host still supports browsing/attach; explicit rename reports an error until that host
-is updated. Do not automatically replace or stop a host with live sessions.
+New naming fields are optional on the wire and in old registries. The dashboard and
+CLI use the shared state-store name map after reading status, including responses from
+pre-naming hosts. Older frontend versions do not understand the new name map. Native
+SQLite TUI sessions without a verified PID/session association cannot get automatic
+Kiro titles yet; they show unique project/agent/ID labels and support manual naming.
+Verified SQLite/V2/V3 store adapters remain next-batch work. Do not replace or stop a
+host with live sessions to make naming work. The dashboard header displays the frontend
+version so a successful binary upgrade is visible.
 
 # Search and scrolling
 
