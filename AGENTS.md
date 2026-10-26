@@ -1,17 +1,29 @@
 # Repository Guidelines
 
-Planning-stage repository. Read `docs/ARCHITECTURE.md`, `docs/SESSIONS.md`, and
+Published Rust 2021 application: https://github.com/sidstack/kiro-agents. Read `docs/ARCHITECTURE.md`, `docs/SESSIONS.md`, and
 `docs/GENERATION-SUPPORT.md` before changing lifecycle or Kiro-launch behavior. Update
 `docs/FINDINGS.md` whenever a probe contradicts a doc claim; findings beat documentation.
 
-## Structure
+## Current scope and structure
 
-- `docs/` — design, Kiro facts, V2/V3 matrix, phases, risks, pi-codex-agents parity.
-- `src/` (planned) — `host/` lifecycle, persistence, locks, IPC; `session/` state machine and
-  PTY supervision; `attach/` passthrough; `board/` ratatui UI; `kiro/` argv, profiles,
-  history, generation; `hooks/` optional telemetry; `config.rs`; `protocol.rs`.
-- `probes/` — P0 scripts and transcripts; never shipped in the package.
-- `tests/` — unit + integration, plus `tests/fake-kiro` and `#[ignore]`d real-CLI probes.
+MVP v3 is the product iteration, not Kiro V3 engine support. The application creates
+fresh Kiro V2 sessions and reattaches to live owned processes. Do not imply that
+history resume, cross-generation migration, hooks or Kiro V3 launching are shipped.
+
+- `src/host/` — lifecycle, registry persistence, locks, IPC and owned PTY supervision.
+- `src/attach/` — native byte passthrough, resize and leader-key detach.
+- `src/board/` — ratatui dashboard, directory/agent selection, rendering and terminal ownership.
+- `src/kiro/` — Kiro argv, capability checks and bounded cancellable agent discovery.
+- `src/main.rs`, `src/lib.rs`, `src/protocol.rs` — CLI, library and IPC definitions.
+- `tests/` — Rust behavioral tests, Python PTY/packaging tests and `tests/fake-kiro`.
+- `docs/` — architecture, findings, parity, release/security policies and MVP journals.
+  `docs/journal/MVP-V3.md` records completed tasks and milestones.
+- `.github/` — checks, security/release workflows, Dependabot and contribution templates.
+- `scripts/package_release.py` — tagged binary packaging and checksums.
+- `probes/` — opt-in probe scripts and output; never shipped in the package.
+
+Use `../pi-codex-agents` as a dashboard interaction/parity reference when available.
+Preserve native Kiro ownership and the boundaries below when adapting an interaction.
 
 ## Hard rules
 
@@ -34,19 +46,25 @@ Planning-stage repository. Read `docs/ARCHITECTURE.md`, `docs/SESSIONS.md`, and
 9. Optional features need a config toggle, cleanup on host close, enabled/disabled test
    coverage, and docs. Core imports the feature trait, never a concrete feature module.
 
-## Build, test, and probe commands (planned)
+## Build, test, and probe commands
+
+Development requires Linux, Rust stable and Python 3.10+ with a PTY-capable environment.
+`rust-toolchain.toml` selects stable with rustfmt and Clippy. End users installing the
+native binary need neither Rust nor Python; Kiro CLI is installed/authenticated separately.
 
 ```sh
-rustup toolchain install stable          # one-time; Rust is not installed on this machine
-cargo fmt --check && cargo clippy --all-targets -- -D warnings
-cargo test
-cargo test --features probe -- --ignored   # requires a real kiro-cli and a throwaway KIRO_HOME
-make probe                                 # writes probes/out/ and docs/FINDINGS.md
+make check                                # fmt, strict Clippy, Rust tests/build, PTY and packaging tests
+cargo install cargo-audit --version 0.22.2 --locked
+make audit                                # RustSec audit; warnings fail
 cargo run --bin kiro-agents -- --help
+cargo install --path . --locked            # install from source
+make probe                                # opt-in ignored real-CLI tests
 ```
 
 Real-CLI probes must use a temporary `KIRO_HOME`/`KIRO_SESSIONS_DIR` and a scratch directory.
 Never run them against the user's real `~/.kiro`, and never make paid model calls in CI.
+Normal checks use fake Kiro and temporary state. Do not restart a live host merely to
+install an updated frontend; host restarts remain explicit user actions.
 
 ## Style
 
@@ -61,11 +79,63 @@ formats.
 
 Name tests `tests/<behavior>.rs` and unit tests in-module. Every lifecycle change needs a
 behavioral regression test. Use `insta` snapshots for board rendering and `tests/fake-kiro`
-for PTY integration. Keep real-CLI tests `#[ignore]`d and probe-gated.
+for PTY integration. Preserve one terminal owner through board → native Kiro → board;
+clear/handoff only after the host attach ACK, with a bounded wait and recovery on failure.
+Keep directory/agent creation usable with selection alone. Agent discovery must stay
+bounded and cancellable, reap its owned process group, and retain default/manual fallback.
+Keep rendering event-driven and status refresh off the input path. Actual authenticated
+agent-list schema and Guacamole visual acceptance remain manual validation areas; fake
+CLI tests do not establish those claims. Keep real-CLI tests `#[ignore]`d and probe-gated.
 
 ## Commits and PRs
 
-Branch from `main`, PR into `main`. Concise imperative subjects
-(`Add V2 resume legality checks`, `Record P0 session-lock findings`). PRs state what changed,
-why, and which checks ran; include `docs/FINDINGS.md` deltas when a probe changed a
-assumption. Never commit real transcripts, `host.log`, or Kiro auth state.
+Branch from `main`, PR into `main`; use Conventional Commit subjects and PR titles
+(`feat: add directory selection`, `fix: restore terminal modes`, `docs: clarify installation`).
+Use `!` or a `BREAKING CHANGE:` footer for breaking changes. Squash merges preserve the
+PR title for version calculation. Protected `main` requires `check` and `rustsec` checks
+and resolved conversations. PRs state what changed, why, and which checks ran; include
+`docs/FINDINGS.md` deltas when a probe changed an assumption.
+
+Never commit real transcripts, `host.log`, Kiro auth state, child environments, generated
+build output or scanner reports containing sensitive data. Follow `CONTRIBUTING.md`,
+`CODE_OF_CONDUCT.md` and `SECURITY.md`; report vulnerabilities privately through GitHub.
+The project is MIT licensed and independent of Kiro, Amazon, OpenAI and Pi.
+
+## Versioning, releases and installation
+
+Release Please owns semantic versions, Cargo.toml/Cargo.lock, the version manifest and
+CHANGELOG.md. `feat:` bumps minor; `fix:` bumps patch. Breaking changes bump minor before
+1.0 and major afterward. Docs/chore changes normally do not release the application.
+Do not hand-bump versions, push release tags, add release override footers or upload local
+builds. Merge the generated release PR to publish a tagged GitHub release and binary.
+
+The release workflow runs checks and a strict RustSec audit, dispatches checks for its
+bot-created PRs, and calls the binary workflow directly on release creation. It uses the
+built-in GITHUB_TOKEN; no personal token or package-registry credentials are required.
+Actions must retain permission to create PRs. Actions are pinned to immutable commits;
+keep PR workflow tokens read-only and grant write permissions only to release jobs.
+
+The current distribution target is Linux x86_64 GNU, built on Ubuntu 22.04 with a documented
+glibc 2.35 baseline. Each release attaches `kiro-agents-vVERSION-x86_64-unknown-linux-gnu.tar.gz`
+and `SHA256SUMS`. Archives include only the executable, LICENSE, README and CHANGELOG.
+Packaging verifies tag/HEAD/Cargo/binary identity. Do not claim cross-toolchain reproducible
+compiler output. No crates.io/npm package, macOS/Windows/ARM/musl binary is published.
+
+Direct users to GitHub Releases and `README.md` installation instructions: verify the
+checksum, extract, install to `~/.local/bin`, then run `kiro-agents doctor`. Source installation
+uses `cargo install --path . --locked`. For workflow retry and detailed release policy, read
+`docs/RELEASING.md`; use its existing-tag binary workflow instead of inventing a new release.
+
+## Security and OSS maintenance
+
+`make audit` checks the complete lockfile with RustSec; CI runs it on changes, releases
+and weekly. Dependabot proposes Cargo and Actions updates. Preserve secret scanning,
+push protection, private vulnerability reporting and dependency alerts on GitHub.
+Do not suppress advisories or weaken release checks to ship a binary.
+
+`docs/SECURITY-REVIEW.md` records dated RustSec and Trivy dependency/secret scan evidence
+and reproduction commands. Results are time-bound: rerun for new claims, record scope
+and tool/database versions, and never describe a clean dependency scan as proof that the
+application, operating system or separately installed Kiro CLI has no vulnerabilities.
+Keep detailed policies and changing evidence in their linked documents rather than
+copying scan counts or release versions into these repository instructions.
