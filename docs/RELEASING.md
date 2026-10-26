@@ -108,6 +108,10 @@ GitHub Releases, checks SHA256SUMS and a regular-file archive allowlist, verifie
 It supports exact beta tags and --uninstall, never uses sudo and never restarts a
 host or modifies Kiro state. It rejects unsupported architectures, musl and glibc
 older than the documented build baseline. See README for the one-line command.
+GitHub exposes the release as latest before the binary job finishes uploading.
+The installer retries asset 404 responses for up to three minutes per asset, showing
+a waiting message; failures preserve the installed executable. Explicit versions first
+check that the release record exists, so unavailable releases fail without that wait.
 Installer regression tests use mocked HTTPS release fixtures; publication tests
 also exercise the installer against a real downloaded release in a temporary prefix.
 

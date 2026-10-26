@@ -24,6 +24,7 @@ class Installer(unittest.TestCase):
                         INSTALL_FIXTURES=str(self.root), INSTALL_ARCH='x86_64')
         self.mock('uname', 'case "$1" in -s) echo Linux;; -m) echo "${INSTALL_ARCH}";; esac')
         self.mock('getconf', 'echo "glibc 2.35"')
+        self.mock('sleep', ':')
         self.mock('curl', '''
 out=''
 while [ "$#" -gt 0 ]; do
@@ -36,6 +37,17 @@ while [ "$#" -gt 0 ]; do
 done
 case "$url" in
  */releases/latest) printf 'https://github.com/sidstack/kiro-agents/releases/tag/v1.2.3';;
+ */releases/tag/*) :;;
+ *.tar.gz)
+   count=0
+   if [ -f "$INSTALL_FIXTURES/pending-count" ]; then count=$(cat "$INSTALL_FIXTURES/pending-count"); fi
+   if [ "$count" -lt "${INSTALL_PENDING_COUNT:-0}" ]; then
+     echo $((count + 1)) > "$INSTALL_FIXTURES/pending-count"
+     printf '404'
+     echo 'fixture: assets not ready' >&2
+     exit 22
+   fi
+   cp "$INSTALL_FIXTURES/${url##*/}" "$out";;
  *) cp "$INSTALL_FIXTURES/${url##*/}" "$out";;
 esac
 ''')
@@ -97,6 +109,32 @@ esac
         self.fixture(identity='9.9.9')
         self.run_install('--version', '1.2.3', success=False)
         self.assertEqual(binary.read_text(), 'keep existing binary')
+
+    def test_an_older_binary_earlier_in_path_is_reported(self):
+        self.fixture()
+        self.mock('kiro-agents', 'echo old-installed-version')
+        result = self.run_install()
+        self.assertIn('Your PATH currently selects', result.stdout)
+        self.assertIn(str(self.bin / 'kiro-agents'), result.stdout)
+        self.assertTrue((self.destination / 'kiro-agents').exists())
+
+    def test_pending_release_assets_are_retried_before_installation(self):
+        self.fixture()
+        self.env['INSTALL_PENDING_COUNT'] = '2'
+        result = self.run_install()
+        self.assertIn('waiting up to three minutes', result.stderr)
+        self.assertTrue((self.destination / 'kiro-agents').exists())
+        self.assertEqual((self.root / 'pending-count').read_text().strip(), '2')
+
+    def test_missing_assets_eventually_fail_without_replacing_existing_binary(self):
+        self.fixture()
+        self.destination.mkdir()
+        binary = self.destination / 'kiro-agents'
+        binary.write_text('keep existing binary')
+        self.env['INSTALL_PENDING_COUNT'] = '100'
+        self.run_install(success=False)
+        self.assertEqual(binary.read_text(), 'keep existing binary')
+        self.assertEqual((self.root / 'pending-count').read_text().strip(), '19')
 
     def test_unsafe_archives_bad_versions_and_unsupported_hosts_are_rejected(self):
         for kind in ['traversal', 'symlink']:
