@@ -54,3 +54,9 @@ startup temporary files must be removed and the final pane exit lets tmux end it
 Next batch (planning only): see [backlog](../BACKLOG.md) for verified V2/V3 native
 store resume and fuzzy/full-text conversation quick-open. Keep that work out of the
 initial multiplexer implementation.
+
+Shortcut follow-up: user selected a direct Ctrl+G return to the board so tmux can
+retain Ctrl+B d for workspace detach. Empty-editor Left Arrow was explicitly deferred;
+Pi has getEditorText(), but this native passthrough does not have an equivalent input
+state signal. Arrow bytes stay unchanged. Ctrl+G now supersedes Kiro's crew shortcut
+while attached.

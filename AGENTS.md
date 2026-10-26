@@ -178,3 +178,8 @@ not an RPC requirement or a reason to restart live hosts. Status enrichment must
 pre-naming hosts. Keep the actual v0.2.0 compatibility regression (synthetic old peer in
 CI), unique unnamed-session labels, and version-independent rendering snapshots. Do not
 claim automatic SQLite TUI titles until ownership mapping is verified; do not guess by cwd.
+
+Attached frontend navigation uses Ctrl+G to return to the board. This explicit user
+choice replaces Kiro's native Ctrl+G crew shortcut while attached. Tmux retains its
+Ctrl+B prefix. Left Arrow always passes through: do not infer editor emptiness from
+keystrokes or parse terminal output to implement an empty-input shortcut.

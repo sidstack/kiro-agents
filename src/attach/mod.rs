@@ -72,31 +72,16 @@ fn poll_pair(first: RawFd, second: RawFd, timeout_ms: i32) -> io::Result<(bool, 
 }
 
 #[derive(Default)]
-pub struct Leader {
-    pending: bool,
-}
+pub struct Leader {}
 
 impl Leader {
-    // Ctrl+B d detaches; Ctrl+B Ctrl+B sends a literal Ctrl+B.
+    // Ctrl+G detaches without conflicting with tmux's Ctrl+B prefix.
     pub fn filter(&mut self, bytes: &[u8]) -> (Vec<u8>, bool) {
-        let mut output = Vec::new();
-        for &byte in bytes {
-            if self.pending {
-                self.pending = false;
-                if byte == b'd' {
-                    return (output, true);
-                }
-                if byte != 2 {
-                    output.push(2);
-                }
-                output.push(byte);
-            } else if byte == 2 {
-                self.pending = true;
-            } else {
-                output.push(byte);
-            }
+        if let Some(index) = bytes.iter().position(|byte| *byte == 7) {
+            (bytes[..index].to_vec(), true)
+        } else {
+            (bytes.to_vec(), false)
         }
-        (output, false)
     }
 }
 

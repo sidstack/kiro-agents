@@ -168,8 +168,8 @@ def main():
             tmux('resize-pane', '-t', first, '-x', '90')
             size = tmux('display-message', '-p', '-t', first, '#{pane_width}x#{pane_height}').strip()
             wait(lambda: f'SIZE:{size}' in capture(first), 'exact resize did not reach fake Kiro')
-            press(b'\x02\x02d')
-            wait(lambda: 'Kiro sessions' in capture(first), 'doubled prefix did not detach inner session')
+            press(b'\x07')
+            wait(lambda: 'Kiro sessions' in capture(first), 'Ctrl+G did not detach inner session')
             assert tmux('list-clients', '-F', '#{client_pid}').strip(), 'inner detach also detached workspace'
             press(b'\r')
             wait(lambda: 'READY:' in capture(first), 'inner session did not reattach')
@@ -230,7 +230,7 @@ def main():
             cli('workspace', 'window', '--terminal', '--dir', str(project), context=own)
             assert len(tmux('list-windows', '-t', 'test', '-F', '#{window_id}').splitlines()) == 4
             tmux('select-window', '-t', 'test:0')
-            tmux('send-keys', '-t', first, 'C-b', 'd')
+            tmux('send-keys', '-t', first, 'C-g')
             wait(lambda: 'Kiro sessions' in capture(first), 'session detach did not return to board')
             tmux('kill-pane', '-t', second)
             after = {row['id']: row for row in json.loads(cli('status', '--json'))}

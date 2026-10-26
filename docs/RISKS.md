@@ -75,9 +75,10 @@ authoritative billing view.
 `Ctrl+B` is tmux's default prefix. Kiro owns `Ctrl+C/D/G/X/O/R/S/T/U/J/Z`, `Tab`,
 `Shift+Tab`, `Esc`.
 
-**Mitigation.** Configurable `leaderKey` (validated against Kiro's reserved set), default
-`Ctrl+B`, auto-suggest `Ctrl+Q` when `TMUX` is set. The leader only activates on a prefix
-timeout window; everything else is forwarded unchanged.
+**Current choice.** Ctrl+G detaches by explicit user preference, overriding Kiro's
+crew shortcut while attached. Ctrl+B remains available to tmux. Left Arrow always
+passes through; empty-editor detection is deferred rather than guessed from input
+bytes. Shortcut configuration and native editor-state integration are not shipped.
 
 ## 9. Secrets and logs
 
@@ -97,7 +98,7 @@ limitation for external editors.
 
 **Mitigation.** P0 tests `!npm run build`, `/editor`, and an interactive prompt under our
 attach path. If `/editor` conflicts with our raw-mode frontend, document it and offer
-`leaderKey`-free suspend (`Ctrl+B Ctrl+Z` → detach and leave the session running).
+explicit detach (Ctrl+G leaves the session running).
 
 ## 11. Host as a long-lived privileged process
 

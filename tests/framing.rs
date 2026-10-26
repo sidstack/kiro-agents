@@ -38,15 +38,17 @@ fn oversized_and_truncated_frames_are_rejected() {
 }
 
 #[test]
-fn leader_preserves_native_keys_and_handles_chunk_boundaries() {
+fn dashboard_shortcut_preserves_arrows_tmux_prefix_and_other_native_keys() {
     let mut leader = Leader::default();
-    let keys = b"\x03\x04\x07\x18\x1b\t\xff";
+    let keys = b"\x03\x04\x18\x1b[D\x1bOD\x02d\x02\t\xff";
     assert_eq!(leader.filter(keys), (keys.to_vec(), false));
-    assert_eq!(leader.filter(b"\x02"), (vec![], false));
-    assert_eq!(leader.filter(b"\x02"), (vec![2], false));
-    assert_eq!(leader.filter(b"\x02x"), (vec![2, b'x'], false));
-    assert_eq!(leader.filter(b"hello\x02"), (b"hello".to_vec(), false));
-    assert_eq!(leader.filter(b"dignored"), (vec![], true));
+    assert_eq!(leader.filter(b"\x1b["), (b"\x1b[".to_vec(), false));
+    assert_eq!(leader.filter(b"D"), (b"D".to_vec(), false));
+    assert_eq!(
+        leader.filter(b"hello\x07ignored"),
+        (b"hello".to_vec(), true)
+    );
+    assert_eq!(leader.filter(b"\x07"), (vec![], true));
 }
 
 #[test]

@@ -86,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix="kiro-terminal-test-") as scratch:
         expect(master, b"SIZE:117x39")
         os.write(master, b"hi")
         expect(master, b"BYTES:6869")
-        os.write(master, b"\x02d")
+        os.write(master, b"\x07")
         assert os.waitstatus_to_exitcode(reap(pid)) == 0
         frontends.remove(pid)
         assert termios.tcgetattr(master)[3] & termios.ICANON

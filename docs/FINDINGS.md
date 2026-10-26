@@ -201,3 +201,9 @@ hashes. It checks the actual pane process cwd through `/proc`, since formatted t
 path metadata may escape characters. `send-keys` bypasses client prefix handling;
 the PTY client is necessary to verify Ctrl+B Ctrl+B d versus workspace Ctrl+B d.
 No production tmux/Kiro server, native store, authentication or model call is involved.
+
+Shortcut follow-up: the user replaced the doubled-prefix workflow with direct Ctrl+G
+detach. The reference Pi extension can check `ctx.ui.getEditorText()` before consuming
+Left Arrow; the wrapper's native PTY passthrough has no equivalent editor-state signal.
+The user explicitly deferred that shortcut. Left Arrow remains byte passthrough,
+and Ctrl+G is an intentional override of Kiro's crew key while attached.

@@ -50,10 +50,11 @@ Press Ctrl+B, release it, then the following key:
 | T | New plain shell pane |
 | C | New plain shell window |
 
-Tmux owns the Ctrl+B prefix. To send the application's existing Ctrl+B d detach
-sequence through tmux and return one Kiro pane to its board, press Ctrl+B Ctrl+B d.
-The first doubled prefix passes a literal Ctrl+B to the application; workspace detach
-is the ordinary Ctrl+B d. Zoom only changes presentation, never session ownership.
+Press **Ctrl+G** to detach Kiro and return that pane to its dashboard. Press
+**Ctrl+B then d** to detach the entire workspace. While attached, Ctrl+G is reserved
+for dashboard navigation instead of Kiro's native crew monitor. Left Arrow passes
+through unchanged, including when the native editor is empty. Zoom only changes
+presentation, never session ownership.
 
 Closing a Kiro pane closes the attached frontend while its managed Kiro process stays
 alive. Closing a shell pane terminates that pane's shell as tmux normally does. Closing
@@ -67,6 +68,6 @@ another pane. Workspaces do not resume stopped historical sessions.
 
 Unit/behavioral tests use private temporary sockets, fake Kiro and temporary
 HOME/XDG/Kiro paths. A real tmux client in a PTY exercises split/window/shell bindings,
-focus, zoom, close confirmation, doubled-prefix inner detach and workspace detach.
+focus, zoom, close confirmation, Ctrl+G inner detach and workspace detach.
 The same suite runs against the extracted optimized beta binary in branch CI.
 Authenticated Kiro and browser/Guacamole visual acceptance remain manual checks.
