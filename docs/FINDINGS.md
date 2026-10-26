@@ -156,3 +156,12 @@ remains a manual follow-up; prior native repaint limits still apply.
   bounds nested traversal and supports read-only profile-file symlinks rather than
   treating a flat regular-file scan as complete. Current V2 CLI acceptance of every
   newer profile format still belongs to Kiro's resolver, not this wrapper.
+
+## Release asset publication window (2026-10-26)
+
+A user installing v0.4.0 hit an asset HTTP 404 after Release Please published the
+release record but before the binary job attached its archive/checksum. The release
+subsequently completed and latest-stable installation was verified as v0.4.0 in a
+temporary prefix. The installer now retries missing assets for a bounded three minutes
+per asset, while preserving any existing binary on failure. Fixtures cover delayed
+assets and exhaustion; this does not weaken checksum or archive/version verification.
