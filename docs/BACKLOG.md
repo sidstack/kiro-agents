@@ -10,6 +10,17 @@ Goal: choose an earlier conversation and continue it from the dashboard, includi
 stored sessions with no live wrapper process. Support both Kiro V2 and V3 stores
 through independently verified adapters.
 
+### Existing manual path (ship/document before a native-store importer)
+
+A user can create a managed Kiro session, then use native `/chat` / `/chat resume`
+to choose an older conversation within that same running process. The dashboard
+continues to manage the process; no wrapper history importer is needed for this
+manual workflow. This does not enumerate every saved conversation as a dashboard
+row, establish its native session ID/generation, or provide full-text quick-open.
+The wrapper's launch cwd/agent metadata may differ from a conversation selected
+inside Kiro; do not claim that they were synchronized. Kiro owns resume legality
+and errors. Keep this workflow available rather than duplicating native controls.
+
 ### Discovery and compatibility milestone
 
 - Probe the installed CLI's supported read-only listing and generation-specific resume
