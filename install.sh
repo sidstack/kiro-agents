@@ -115,4 +115,8 @@ mv -fT -- "$staged_binary" "$install_dir/kiro-agents"
 staged_binary=''
 printf 'Installed %s to %s/kiro-agents\n' "$release_tag" "$install_dir"
 case ":${PATH:-}:" in *":$install_dir:"*) ;; *) printf 'Add %s to your PATH.\n' "$install_dir" ;; esac
+selected_binary=$(command -v kiro-agents || true)
+if [ -n "$selected_binary" ] && [ "$selected_binary" != "$install_dir/kiro-agents" ]; then
+    printf 'Your PATH currently selects %s. Run %s/kiro-agents directly or put its directory first in PATH.\n' "$selected_binary" "$install_dir"
+fi
 printf 'Run kiro-agents doctor. Install/authenticate Kiro CLI separately. Existing hosts are unchanged.\n'

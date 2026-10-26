@@ -110,6 +110,14 @@ esac
         self.run_install('--version', '1.2.3', success=False)
         self.assertEqual(binary.read_text(), 'keep existing binary')
 
+    def test_an_older_binary_earlier_in_path_is_reported(self):
+        self.fixture()
+        self.mock('kiro-agents', 'echo old-installed-version')
+        result = self.run_install()
+        self.assertIn('Your PATH currently selects', result.stdout)
+        self.assertIn(str(self.bin / 'kiro-agents'), result.stdout)
+        self.assertTrue((self.destination / 'kiro-agents').exists())
+
     def test_pending_release_assets_are_retried_before_installation(self):
         self.fixture()
         self.env['INSTALL_PENDING_COUNT'] = '2'
