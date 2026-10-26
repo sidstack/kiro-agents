@@ -16,7 +16,7 @@
 
 - [x] Publish verified artifacts from trusted default-branch code only.
 - [x] Keep fork runs read-only and stable releases latest.
-- [ ] Enable hosted workflows and beta integration as a merge requirement.
+- [x] Enable hosted workflows and beta integration as a merge requirement.
 - [ ] Produce and verify a beta for the dependency PR before merging it.
 
 Work split: two Pi swarm workers using Strata Qwen 3.8 implement beta packaging
