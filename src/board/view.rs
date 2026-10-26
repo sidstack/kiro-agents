@@ -6,7 +6,6 @@ use ratatui::{
     widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
-use std::path::Path;
 
 const ACCENT: Color = Color::Cyan;
 
@@ -50,10 +49,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
         .iter()
         .map(|&index| {
             let row = &board.rows[index];
-            let name = Path::new(&row.cwd)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(&row.cwd);
+            let name = row.display_name();
             let color = match row.state.as_str() {
                 "live" => Color::Green,
                 "failed" => Color::Red,
@@ -65,15 +61,17 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
                         format!("{name}  "),
                         Style::default().add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw(format!(
-                        "{}  ·  {}  ·  ",
-                        row.agent.as_deref().unwrap_or("Kiro default"),
-                        row.generation
-                    )),
+                    Span::raw(" · "),
                     Span::styled(row.state.clone(), Style::default().fg(color)),
                 ]),
                 Line::styled(
-                    format!("{}  ·  {}", row.id, row.cwd),
+                    format!(
+                        "{} · {} · {} · {}",
+                        row.agent.as_deref().unwrap_or("Kiro default"),
+                        row.generation,
+                        row.id,
+                        row.cwd
+                    ),
                     Style::default().fg(Color::DarkGray),
                 ),
             ])
@@ -109,7 +107,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
     frame.render_widget(
         Paragraph::new(vec![
             Line::raw("↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh"),
-            Line::raw("Ctrl+N create · Ctrl+K stop · q/Ctrl+Q quit (sessions stay alive)"),
+            Line::raw("Ctrl+N create · F2 rename · Ctrl+K stop · q/Ctrl+Q quit"),
             Line::styled(message, Style::default().fg(Color::Yellow)),
         ]),
         areas[3],
@@ -117,7 +115,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
 
     if matches!(
         mode,
-        Mode::Directory(_) | Mode::Agent { .. } | Mode::Stop(_)
+        Mode::Directory(_) | Mode::Agent { .. } | Mode::Stop(_) | Mode::Rename { .. }
     ) {
         frame.render_widget(Clear, area);
         frame.render_widget(
@@ -141,6 +139,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
                 )),
                 parts[0],
             );
+            input_cursor(frame, parts[0], "Search or path: ", &picker.query, 1);
             let items = picker
                 .candidates
                 .iter()
@@ -160,8 +159,10 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
             };
             frame.render_widget(
                 Paragraph::new(vec![
-                    Line::raw("↑/↓ select · Enter choose · Tab/→ browse · ← parent"),
-                    Line::raw("Type to filter · Ctrl+U clear · Ctrl+R rescan · Esc cancel"),
+                    Line::raw("Type a fuzzy query · Enter chooses best match · ↑/↓ optional"),
+                    Line::raw(
+                        "Tab/→ browse · ← parent · Backspace edit · Ctrl+U clear · Esc cancel",
+                    ),
                     Line::styled(notice, Style::default().fg(Color::Yellow)),
                 ])
                 .wrap(Wrap { trim: false }),
@@ -183,6 +184,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
                 )),
                 parts[0],
             );
+            input_cursor(frame, parts[0], "Filter: ", &picker.query, 1);
             let items = picker
                 .options
                 .iter()
@@ -207,21 +209,32 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
                         "Listing limited to 200 agents. Type a name if it is absent."
                     }
                     AgentStatus::Ready => "Choose a native agent or let Kiro apply its default.",
+                    AgentStatus::Unrecognized if picker.truncated => {
+                        "Scoped profile scan limited. Refine the query or type an exact agent name."
+                    }
                     AgentStatus::Unrecognized => {
-                        "Unknown agent-list format. Choose default or type an agent name."
+                        "Native listing unavailable. Scoped profiles shown when found; Kiro validates on launch."
                     }
                     AgentStatus::Failed(error) => error,
                 }
             };
             frame.render_widget(
                 Paragraph::new(vec![
-                    Line::raw("↑/↓ select · Enter create · Type to filter or enter a name"),
-                    Line::raw("Ctrl+R retry · Ctrl+U clear · Esc back to directory"),
+                    Line::raw("Type a fuzzy query · Enter creates · ↑/↓ optional"),
+                    Line::raw("Backspace edits · Ctrl+R retry · Ctrl+U clear · Esc back"),
                     Line::styled(status, Style::default().fg(Color::Yellow)),
                 ])
                 .wrap(Wrap { trim: false }),
                 parts[2],
             );
+        }
+        Mode::Rename { id, query } => {
+            let popup = modal(frame, "Name session");
+            frame.render_widget(
+                Paragraph::new(format!("{id}\nName: {query}\n\nEnter saves · empty name restores automatic title\nCtrl+U clears · Esc cancels\n{message}"))
+                    .wrap(Wrap { trim: false }), popup);
+            input_cursor(frame, popup, "Name: ", query, 1);
+            input_cursor(frame, popup, "Name: ", query, 1);
         }
         Mode::Stop(id) => {
             let popup = modal(frame, "Stop session? y/n");
@@ -235,6 +248,16 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
         }
         _ => (),
     }
+}
+
+fn input_cursor(frame: &mut Frame, rect: Rect, prefix: &str, text: &str, line: u16) {
+    if rect.width == 0 || rect.height <= line {
+        return;
+    }
+    let column = Line::from(format!("{prefix}{text}"))
+        .width()
+        .min(usize::from(rect.width.saturating_sub(1))) as u16;
+    frame.set_cursor_position((rect.x + column, rect.y + line));
 }
 
 fn choice_list(items: Vec<ListItem<'_>>) -> List<'_> {
@@ -305,6 +328,9 @@ mod tests {
         let mut board = Board::default();
         insta::assert_snapshot!("empty", render(&board, &Mode::Browse, 100, 20));
         board.replace_rows(vec![SessionInfo {
+            name: None,
+            title: None,
+            title_source: None,
             id: "session-one".into(),
             cwd: "/work/project".into(),
             agent: Some("reviewer".into()),

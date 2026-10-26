@@ -21,12 +21,30 @@ impl Board {
     /// Row indices that pass the live/all filter and the search query.
     pub fn visible_indices(&self) -> Vec<usize> {
         let query = self.query.to_lowercase();
-        self.rows
+        let mut rows: Vec<_> = self
+            .rows
             .iter()
             .enumerate()
             .filter(|(_, row)| self.matches(row, &query))
             .map(|(index, _)| index)
-            .collect()
+            .collect();
+        if !query.is_empty() {
+            rows.sort_by_key(|&index| {
+                let row = &self.rows[index];
+                let label = row.display_name().to_lowercase();
+                let rank = if label == query {
+                    0
+                } else if label.starts_with(&query) {
+                    1
+                } else if label.contains(&query) {
+                    2
+                } else {
+                    3
+                };
+                (rank, index)
+            });
+        }
+        rows
     }
 
     /// The selected row, or None when nothing is selected or visible.
@@ -61,6 +79,7 @@ impl Board {
 
     pub fn set_query(&mut self, query: String) {
         self.query = query;
+        self.selected = None;
         self.reanchor();
     }
 
@@ -80,10 +99,17 @@ impl Board {
         if query.is_empty() {
             return true;
         }
-        [row.id.as_str(), row.cwd.as_str(), row.state.as_str()]
-            .into_iter()
-            .chain(row.agent.as_deref())
-            .any(|field| field.to_lowercase().contains(query))
+        let label = row.display_name();
+        let matches = [
+            row.id.as_str(),
+            row.cwd.as_str(),
+            row.state.as_str(),
+            label.as_str(),
+        ]
+        .into_iter()
+        .chain(row.agent.as_deref())
+        .any(|field| super::picker::matches(query, field));
+        matches
     }
 
     /// Keep the selected id when it is still visible, otherwise select the first
@@ -106,6 +132,9 @@ mod tests {
 
     fn row(id: &str, cwd: &str, agent: Option<&str>, state: &str) -> SessionInfo {
         SessionInfo {
+            name: None,
+            title: None,
+            title_source: None,
             id: id.into(),
             cwd: cwd.into(),
             agent: agent.map(str::to_string),

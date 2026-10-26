@@ -25,7 +25,7 @@ The local 0.1.0/0.2.0 MVP iterations were never published GitHub releases.
 Every push to a branch other than `main` runs **Branch beta**. It runs `make check`
 (Rust tests, snapshots, fake-Kiro PTY integration and packaging tests), a strict
 RustSec audit, then packages an optimized Linux x86_64 binary. The extracted binary
-must pass all six PTY integration scripts before the `beta-linux` artifact is uploaded.
+must pass all PTY integration scripts before the `beta-linux` artifact is uploaded.
 Fork pull requests get the same build/tests as a read-only artifact, without publication.
 No real Kiro authentication or paid model calls are used.
 

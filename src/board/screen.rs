@@ -11,7 +11,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{self, Write};
 
 /// Own the frontend terminal for the entire board/native/board interaction.
-/// Native attachment borrows the display, without restoring the shell between views.
+/// Native attachment uses the primary screen so the outer terminal retains scrollback.
 pub(super) struct Screen {
     pub terminal: Terminal<CrosstermBackend<io::Stdout>>,
 }
@@ -42,11 +42,12 @@ impl Screen {
         Ok(())
     }
 
-    /// Called only after the host accepts attachment. Raw mode and the
-    /// alternate screen remain owned here while native bytes are forwarded.
+    /// Called only after the host accepts attachment. Keep raw mode, but leave
+    /// the board alternate screen so native output has normal terminal history.
+    /// Kiro remains free to enter its own alternate screen, just as when run directly.
     pub fn prepare_native(&mut self) -> Result<()> {
         let mut output = io::stdout();
-        execute!(output, Clear(ClearType::All), MoveTo(0, 0), Show)?;
+        execute!(output, LeaveAlternateScreen, Show)?;
         output.flush()?;
         Ok(())
     }

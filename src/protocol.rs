@@ -16,6 +16,7 @@ pub enum Action {
     New { cwd: String, agent: Option<String> },
     Attach { id: String, cols: u16, rows: u16 },
     Stop { id: String },
+    Rename { id: String, name: Option<String> },
     Shutdown,
     Input(Vec<u8>),
     Resize { cols: u16, rows: u16 },
@@ -25,7 +26,7 @@ pub enum Action {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Reply {
     Sessions(Vec<SessionInfo>),
-    Created(SessionInfo),
+    Created(Box<SessionInfo>),
     Ok,
     Output(Vec<u8>),
     End,
@@ -34,6 +35,12 @@ pub enum Reply {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_source: Option<String>,
     pub id: String,
     pub cwd: String,
     pub agent: Option<String>,
@@ -42,6 +49,26 @@ pub struct SessionInfo {
     pub state: String,
     pub exit_code: Option<u32>,
     pub notice: Option<String>,
+}
+
+impl SessionInfo {
+    pub fn display_name(&self) -> String {
+        self.name
+            .as_deref()
+            .or(self.title.as_deref())
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                let project = std::path::Path::new(&self.cwd)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(&self.cwd);
+                format!(
+                    "{} · {}",
+                    project,
+                    self.agent.as_deref().unwrap_or("Kiro default")
+                )
+            })
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

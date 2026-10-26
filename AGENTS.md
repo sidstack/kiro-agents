@@ -79,8 +79,9 @@ formats.
 
 Name tests `tests/<behavior>.rs` and unit tests in-module. Every lifecycle change needs a
 behavioral regression test. Use `insta` snapshots for board rendering and `tests/fake-kiro`
-for PTY integration. Preserve one terminal owner through board → native Kiro → board;
-clear/handoff only after the host attach ACK, with a bounded wait and recovery on failure.
+for PTY integration. Preserve raw mode through board → native Kiro → board; release the board alternate
+screen only after the host attach ACK so native primary-screen scrollback works, with
+a bounded wait and recovery on failure. Forward wheel/PageUp bytes unchanged.
 Keep directory/agent creation usable with selection alone. Agent discovery must stay
 bounded and cancellable, reap its owned process group, and retain default/manual fallback.
 Keep rendering event-driven and status refresh off the input path. Actual authenticated
@@ -126,7 +127,7 @@ checksum, extract, install to `~/.local/bin`, then run `kiro-agents doctor`. Sou
 uses `cargo install --path . --locked`. For workflow retry and detailed release policy, read
 `docs/RELEASING.md`; use its existing-tag binary workflow instead of inventing a new release.
 
-Branch beta workflows run full checks and audit before packaging, then rerun all six
+Branch beta workflows run full checks and audit before packaging, then rerun all
 fake-Kiro PTY scripts against the extracted optimized binary. Betas use the next Cargo
 patch plus `-beta.RUN.ATTEMPT`, recording the exact source SHA without committing version
 changes. A separate publisher executes only trusted default-branch code and validates
@@ -148,3 +149,9 @@ and tool/database versions, and never describe a clean dependency scan as proof 
 application, operating system or separately installed Kiro CLI has no vulnerabilities.
 Keep detailed policies and changing evidence in their linked documents rather than
 copying scan counts or release versions into these repository instructions.
+
+Session names prefer explicit wrapper overrides, then PID/cwd/fresh-lock-matched native
+Kiro titles, then a bounded first-Prompt extractive title, then project/agent. Never guess
+by newest session in a directory, write native titles, or parse terminal traffic for names.
+`KIRO_AGENTS_AUTO_NAME=auto|kiro|off` controls read-only enrichment at host startup;
+manual names remain available. See `docs/SESSION-NAMES.md` for bounds and compatibility.

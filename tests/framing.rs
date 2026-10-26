@@ -48,3 +48,21 @@ fn leader_preserves_native_keys_and_handles_chunk_boundaries() {
     assert_eq!(leader.filter(b"hello\x02"), (b"hello".to_vec(), false));
     assert_eq!(leader.filter(b"dignored"), (vec![], true));
 }
+
+#[test]
+fn enriched_created_reply_preserves_the_existing_wire_shape() {
+    let original = serde_json::json!({"Created": {
+        "id":"wrapper", "cwd":"/tmp/project", "agent":null,
+        "generation":"v2", "pid":42, "state":"live", "exit_code":null,"notice":null
+    }});
+    let reply: kiro_agents::protocol::Reply = serde_json::from_value(original.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&reply).unwrap(), original);
+    if let kiro_agents::protocol::Reply::Created(mut row) = reply {
+        row.name = Some("Fix picker".into());
+        let encoded = serde_json::to_value(kiro_agents::protocol::Reply::Created(row)).unwrap();
+        assert_eq!(encoded["Created"]["name"], "Fix picker");
+        assert_eq!(encoded["Created"]["id"], "wrapper");
+    } else {
+        panic!("Expected created reply")
+    }
+}

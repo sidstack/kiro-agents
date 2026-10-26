@@ -24,6 +24,8 @@ pub enum Origin {
     Typed,
     /// A subdirectory of the listed directory.
     Directory,
+    /// A sibling of the listed directory, for bare project fragments.
+    Sibling,
 }
 
 impl Origin {
@@ -34,6 +36,7 @@ impl Origin {
             Origin::Recent => "session",
             Origin::Typed => "typed",
             Origin::Directory => "dir",
+            Origin::Sibling => "sibling",
         }
     }
 }
@@ -75,6 +78,13 @@ impl DirPicker {
     /// Recompute candidates from the current base and query. Selection stays
     /// on the same path when it survives, otherwise it returns to the top.
     pub fn rebuild(&mut self) {
+        self.rebuild_ranking(true);
+    }
+
+    /// Recompute candidates, and when `keep_anchor` is false highlight the
+    /// best-ranked match. A query edit re-ranks so Enter never needs an arrow,
+    /// while an explicit refresh keeps the operator's highlighted path.
+    fn rebuild_ranking(&mut self, keep_anchor: bool) {
         let anchor = self
             .candidates
             .get(self.selected)
@@ -158,37 +168,62 @@ impl DirPicker {
                 });
             }
         } else {
+            // Rank every match, sessions included, so the best fuzzy hit is
+            // always the row Enter would take.
+            let mut ranked: Vec<(usize, Origin, String)> = Vec::new();
             for path in self.recent_paths() {
-                if matches(&lower, &path) && !seen.contains(&path) {
-                    seen.push(path.clone());
-                    rows.push(Candidate {
-                        path,
-                        origin: Origin::Recent,
-                    });
+                if seen.contains(&path) {
+                    continue;
+                }
+                let by_name = (!fragment_lower.is_empty())
+                    .then(|| fuzzy_score(&fragment_lower, &file_name(&path)))
+                    .flatten();
+                let score = max_score(by_name, fuzzy_score(&lower, &path));
+                if let Some(score) = score {
+                    ranked.push((score, Origin::Recent, path));
                 }
             }
             let (names, cut) = kiro::subdirectories(Path::new(&listing_root), MAX_LISTING);
             truncated = truncated || cut;
-            let mut matched: Vec<(usize, String)> = names
-                .into_iter()
-                .filter(|name| matches(&fragment_lower, name))
-                .map(|name| (score(&fragment_lower, &name), name))
-                .collect();
-            matched.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-            for (_, name) in matched {
-                if rows.len() >= MAX_CANDIDATES {
-                    truncated = true;
-                    break;
+            for name in names {
+                if let Some(score) = fuzzy_score(&fragment_lower, &name) {
+                    ranked.push((score, Origin::Directory, join(&listing_root, &name)));
                 }
-                let path = join(&listing_root, &name);
+            }
+            // A bare fragment usually names a sibling project, so the parent
+            // is listed too, with the same bound and no recursive crawl. Any
+            // query with a slash keeps explicit path semantics.
+            if !self.query.contains('/') && query != "~" {
+                if let Some(parent) = parent_of_opt(&listing_root) {
+                    let (names, cut) = kiro::subdirectories(Path::new(&parent), MAX_LISTING);
+                    truncated = truncated || cut;
+                    for name in names {
+                        let path = join(&parent, &name);
+                        if seen.contains(&path) {
+                            continue;
+                        }
+                        if let Some(score) = fuzzy_score(&fragment_lower, &name) {
+                            ranked.push((score, Origin::Sibling, path));
+                        }
+                    }
+                }
+            }
+            ranked.sort_by(|a, b| {
+                b.0.cmp(&a.0)
+                    .then_with(|| origin_rank(a.1).cmp(&origin_rank(b.1)))
+                    .then_with(|| file_name(&a.2).cmp(&file_name(&b.2)))
+            });
+            let room = MAX_CANDIDATES.saturating_sub(rows.len());
+            if ranked.len() > room {
+                truncated = true;
+                ranked.truncate(room);
+            }
+            for (_, origin, path) in ranked {
                 if seen.contains(&path) {
                     continue;
                 }
                 seen.push(path.clone());
-                rows.push(Candidate {
-                    path,
-                    origin: Origin::Directory,
-                });
+                rows.push(Candidate { path, origin });
             }
         }
 
@@ -202,6 +237,10 @@ impl DirPicker {
                 .unwrap_or(0),
             None => 0,
         };
+        if !keep_anchor {
+            // Rows are ranked best first, so the top match is highlighted.
+            self.selected = 0;
+        }
         self.selected = self.selected.min(self.candidates.len().saturating_sub(1));
         self.notice = if self.candidates.is_empty() && !query.is_empty() {
             Some(format!(
@@ -223,18 +262,20 @@ impl DirPicker {
 
     pub fn press(&mut self, ch: char) {
         self.query.push(ch);
-        self.rebuild();
+        self.rebuild_ranking(false);
     }
 
+    /// Editing pops one character, never a byte, so a composed letter stays
+    /// whole and the remaining query re-ranks.
     pub fn backspace(&mut self) {
         self.query.pop();
-        self.rebuild();
+        self.rebuild_ranking(false);
     }
 
     pub fn clear_query(&mut self) {
         if !self.query.is_empty() {
             self.query.clear();
-            self.rebuild();
+            self.rebuild_ranking(false);
         }
     }
 
@@ -319,6 +360,26 @@ fn file_name(path: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Listing order wins ties between equally ranked rows.
+fn origin_rank(origin: Origin) -> u8 {
+    match origin {
+        Origin::Typed => 0,
+        Origin::Here => 1,
+        Origin::Recent => 2,
+        Origin::Parent => 3,
+        Origin::Directory => 4,
+        Origin::Sibling => 5,
+    }
+}
+
+fn max_score(a: Option<usize>, b: Option<usize>) -> Option<usize> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) | (None, Some(a)) => Some(a),
+        (None, None) => None,
+    }
+}
+
 /// Expand `~`, `~/x` and relative paths against the picker's base directory.
 /// Only an existing path resolves, so a half-typed query stays a filter.
 pub fn resolve(base: &str, text: &str) -> Option<PathBuf> {
@@ -341,37 +402,105 @@ fn expand_input(base: &str, text: &str) -> Option<PathBuf> {
     }
 }
 
-/// Substring first, then a subsequence, so short fragments still find a name.
+/// True when the query fuzzy-matches the target at all.
 pub fn matches(query: &str, target: &str) -> bool {
-    if query.is_empty() {
-        return true;
-    }
-    let target = target.to_lowercase();
-    if target.contains(query) {
-        return true;
-    }
-    let mut offset = 0usize;
-    for ch in query.chars() {
-        let rest = &target[offset..];
-        match rest.find(ch) {
-            Some(index) => offset += index + ch.len_utf8(),
-            None => return false,
-        }
-    }
-    true
+    fuzzy_score(query, target).is_some()
 }
 
-fn score(query: &str, name: &str) -> usize {
-    let lower = name.to_lowercase();
-    if lower.starts_with(query) {
-        4
-    } else if lower.contains(query) {
-        3
-    } else if matches(query, &lower) {
-        1
-    } else {
-        0
+// Ranked bands, deliberately far apart so a band always beats a bonus.
+const EXACT: usize = 100_000;
+const PREFIX: usize = 60_000;
+const WORD_START: usize = 45_000;
+const SUBSTRING: usize = 30_000;
+const SUBSEQUENCE: usize = 15_000;
+/// Tight subsequence shaping: contiguous runs and word starts are rewarded,
+/// skipped characters are penalised, so `code rev` outranks a scattered hit.
+const ADJACENT: i64 = 120;
+const WORD_BONUS: i64 = 60;
+const GAP: i64 = 8;
+
+/// Unicode case-insensitive fuzzy rank. `None` means the query characters do
+/// not appear in order; otherwise a higher score is a better match: exact,
+/// prefix, word start, contiguous substring, then a tight subsequence ranked
+/// above a distant one. Matching is by character, never by byte.
+pub fn fuzzy_score(query: &str, target: &str) -> Option<usize> {
+    let query: Vec<char> = query.trim().to_lowercase().chars().collect();
+    if query.is_empty() {
+        return Some(0);
     }
+    let target_chars: Vec<char> = target.to_lowercase().chars().collect();
+    let target_text: String = target_chars.iter().collect();
+    let query_text: String = query.iter().collect();
+    if target_text == query_text {
+        return Some(EXACT);
+    }
+    if let Some(byte_at) = target_text.find(&query_text) {
+        let at = target_text[..byte_at].chars().count();
+        let band = if at == 0 {
+            PREFIX
+        } else if is_word_start(&target_chars, at) {
+            WORD_START
+        } else {
+            SUBSTRING
+        };
+        return Some(band.saturating_sub(at));
+    }
+    subsequence_score(&query, &target_chars).map(|score| score.min(SUBSTRING - 1))
+}
+
+fn is_word_start(target: &[char], at: usize) -> bool {
+    match at.checked_sub(1).and_then(|index| target.get(index)) {
+        None => true,
+        Some(before) => !before.is_alphanumeric(),
+    }
+}
+
+/// Best scoring subsequence alignment of `query` inside `target`.
+fn subsequence_score(query: &[char], target: &[char]) -> Option<usize> {
+    // One cell per target position keeps every query update O(query * target).
+    let mut layer: Vec<Option<i64>> = target
+        .iter()
+        .enumerate()
+        .map(|(at, ch)| (*ch == query[0]).then(|| SUBSEQUENCE as i64 + word_bonus(target, at)))
+        .collect();
+    for wanted in &query[1..] {
+        let mut next = vec![None; target.len()];
+        let mut distant: Option<i64> = None;
+        for at in 0..target.len() {
+            distant = distant.map(|value| value - GAP);
+            if at >= 2 {
+                if let Some(value) = layer[at - 2] {
+                    let candidate = value - GAP;
+                    distant = Some(distant.map_or(candidate, |best| best.max(candidate)));
+                }
+            }
+            let adjacent = at
+                .checked_sub(1)
+                .and_then(|before| layer[before])
+                .map(|value| value + ADJACENT);
+            let best = match (distant, adjacent) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (Some(value), None) | (None, Some(value)) => Some(value),
+                _ => None,
+            };
+            if target[at] == *wanted {
+                next[at] = best.map(|value| value + word_bonus(target, at));
+            }
+        }
+        if next.iter().all(Option::is_none) {
+            return None;
+        }
+        layer = next;
+    }
+    layer
+        .into_iter()
+        .flatten()
+        .max()
+        .map(|value| value.max(1) as usize)
+}
+
+fn word_bonus(target: &[char], at: usize) -> i64 {
+    i64::from(is_word_start(target, at)) * WORD_BONUS
 }
 
 /// Agent choice for one directory. Discovery is asynchronous: the listing
@@ -441,7 +570,7 @@ impl AgentPicker {
             Ok(list) => {
                 self.names = list.names;
                 self.truncated = list.truncated;
-                self.status = if list.unrecognized && self.names.is_empty() {
+                self.status = if list.unrecognized {
                     AgentStatus::Unrecognized
                 } else {
                     AgentStatus::Ready
@@ -454,29 +583,46 @@ impl AgentPicker {
     }
 
     fn refilter(&mut self) {
+        self.refilter_ranking(true);
+    }
+
+    /// Rebuild the option list. A query edit ranks profiles by fuzzy score and
+    /// highlights the best one, so Enter creates with the top match and no
+    /// arrow press. A discovery reply keeps the highlighted profile.
+    fn refilter_ranking(&mut self, keep_anchor: bool) {
         let anchor = self.selected_name();
         let query = self.query.trim().to_lowercase();
         let mut options = vec![None];
-        options.extend(
-            self.names
+        if query.is_empty() {
+            options.extend(self.names.iter().map(|name| Some(name.clone())));
+        } else {
+            let mut ranked: Vec<(usize, String)> = self
+                .names
                 .iter()
-                .filter(|name| matches(&query, name))
-                .map(|name| Some(name.clone())),
-        );
+                .filter_map(|name| Some((fuzzy_score(&query, name)?, name.clone())))
+                .collect();
+            ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            options.extend(ranked.into_iter().map(|(_, name)| Some(name)));
+        }
         if options.len() == 1 && !query.is_empty() {
             options.push(Some(self.query.trim().to_owned()));
         }
         self.options = options;
-        self.selected = match anchor {
-            // A typed fragment moves the highlight onto the first matching
-            // profile, so Enter picks it without pressing ↓.
-            None if !query.is_empty() && self.options.len() > 1 => 1,
-            Some(name) => self
-                .options
-                .iter()
-                .position(|option| option.as_deref() == Some(name.as_str()))
-                .unwrap_or(usize::from(!query.is_empty() && self.options.len() > 1)),
-            _ => 0,
+        self.selected = if !keep_anchor {
+            // A query edit highlights the top ranked profile, never a stale one.
+            usize::from(!query.is_empty() && self.options.len() > 1)
+        } else {
+            match anchor {
+                // A typed fragment moves the highlight onto the best matching
+                // profile, so Enter picks it without pressing ↓.
+                None if !query.is_empty() && self.options.len() > 1 => 1,
+                Some(name) => self
+                    .options
+                    .iter()
+                    .position(|option| option.as_deref() == Some(name.as_str()))
+                    .unwrap_or(usize::from(!query.is_empty() && self.options.len() > 1)),
+                _ => 0,
+            }
         };
     }
 
@@ -488,12 +634,12 @@ impl AgentPicker {
 
     pub fn press(&mut self, ch: char) {
         self.query.push(ch);
-        self.refilter();
+        self.refilter_ranking(false);
     }
 
     pub fn backspace(&mut self) {
         self.query.pop();
-        self.refilter();
+        self.refilter_ranking(false);
     }
 
     pub fn move_selection(&mut self, delta: i32) {
@@ -543,8 +689,23 @@ mod tests {
         (AgentPicker::new(cwd, token), receiver)
     }
 
-    fn tree() -> tempfile::TempDir {
-        let root = tempfile::tempdir().unwrap();
+    /// A temporary workspace with a controlled parent, so the bounded sibling
+    /// scan sees a fixed listing instead of whatever else lives in `/tmp`.
+    struct Fixture {
+        _outer: tempfile::TempDir,
+        root: PathBuf,
+    }
+
+    impl Fixture {
+        fn path(&self) -> &Path {
+            &self.root
+        }
+    }
+
+    fn tree() -> Fixture {
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("projects");
+        fs::create_dir_all(&root).unwrap();
         for name in [
             "api-gateway",
             "code-reviewer",
@@ -553,9 +714,28 @@ mod tests {
             "node_modules",
             ".hidden",
         ] {
-            fs::create_dir_all(root.path().join(name)).unwrap();
+            fs::create_dir_all(root.join(name)).unwrap();
         }
-        root
+        // A project next to the listed directory: a bare fragment must find it
+        // without pressing ← first.
+        fs::create_dir_all(outer.path().join("design-system")).unwrap();
+        Fixture {
+            _outer: outer,
+            root,
+        }
+    }
+
+    fn empty_workspace(names: &[&str]) -> Fixture {
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("projects");
+        fs::create_dir_all(&root).unwrap();
+        for name in names {
+            fs::create_dir_all(root.join(name)).unwrap();
+        }
+        Fixture {
+            _outer: outer,
+            root,
+        }
     }
 
     fn path(root: &Path, name: &str) -> String {
@@ -655,9 +835,7 @@ mod tests {
 
     #[test]
     fn unicode_and_case_insensitive_search_never_panics() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir(root.path().join("Ünïcödé-app")).unwrap();
-        fs::create_dir(root.path().join("plain")).unwrap();
+        let root = empty_workspace(&["Ünïcödé-app", "plain"]);
         let mut picker = DirPicker::open(root.path().to_string_lossy().to_string(), Vec::new());
         for ch in "ünï".chars() {
             picker.press(ch);
@@ -780,6 +958,147 @@ mod tests {
     }
 
     #[test]
+    fn fuzzy_score_ranks_exact_prefix_word_start_and_tight_matches() {
+        assert_eq!(fuzzy_score("", "anything"), Some(0));
+        let exact = fuzzy_score("code-reviewer", "code-reviewer").unwrap();
+        let prefix = fuzzy_score("code-rev", "code-reviewer").unwrap();
+        let word = fuzzy_score("rev", "code-reviewer").unwrap();
+        let inside = fuzzy_score("de-re", "code-reviewer").unwrap();
+        let tight = fuzzy_score("cdrev", "code-reviewer").unwrap();
+        let distant = fuzzy_score("crer", "cold-drink-waterfall").unwrap();
+        assert!(
+            exact > prefix && prefix > word && word > inside && inside > tight,
+            "{exact} {prefix} {word} {inside} {tight}"
+        );
+        // A tight subsequence beats a scattered one, and both still match.
+        let near = fuzzy_score("coderev", "code_reviewer_app").unwrap();
+        assert!(near > distant, "{near} {distant}");
+        assert!(tight > distant, "{tight} {distant}");
+        // Case folds are Unicode-aware and matching never looks inside a char.
+        assert!(fuzzy_score("CODE", "code-reviewer").unwrap() >= prefix / 2);
+        assert!(fuzzy_score("ünï", "Ünïcödé-app").is_some());
+        assert!(fuzzy_score("CÖD", "ünïcödé-app").is_some());
+        assert_eq!(fuzzy_score("zz", "code-reviewer"), None);
+        assert_eq!(fuzzy_score("🙂x-app", "🙂x-app"), Some(EXACT));
+        assert_eq!(fuzzy_score("🙂x", "🙂x-app"), Some(PREFIX));
+        assert_eq!(fuzzy_score("uni", "ünïcödé-app"), None);
+        assert!(matches("cdwr", "code-reviewer"));
+    }
+
+    #[test]
+    fn typing_a_sibling_fragment_needs_no_arrow_and_enter_takes_the_best_row() {
+        let root = tree();
+        let mut picker = DirPicker::open(root.path().to_string_lossy().to_string(), Vec::new());
+        for ch in "design".chars() {
+            picker.press(ch);
+        }
+        // The parent listing is searched with the same bound as the child one.
+        assert_eq!(names(&picker), vec![("design-system", Origin::Sibling)]);
+        assert_eq!(picker.selected, 0);
+        assert_eq!(
+            picker.accept().unwrap(),
+            root._outer.path().join("design-system").to_string_lossy()
+        );
+        // From a nested directory the same fragment style finds its sibling.
+        let mut picker = DirPicker::open(path(root.path(), "nested"), Vec::new());
+        for ch in "code-rev".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.candidates[0].origin, Origin::Sibling);
+        assert_eq!(picker.accept().unwrap(), path(root.path(), "code-reviewer"));
+    }
+
+    #[test]
+    fn editing_a_query_re_ranks_instead_of_keeping_a_stale_weak_match() {
+        let root = tree();
+        let mut picker = DirPicker::open(root.path().to_string_lossy().to_string(), Vec::new());
+        for ch in "api".chars() {
+            picker.press(ch);
+        }
+        assert!(picker.accept().unwrap().ends_with("/api-gateway"));
+        // A weak highlight is replaced by the new best fuzzy match.
+        for ch in "-gateway".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.selected, 0);
+        assert!(picker.accept().unwrap().ends_with("/api-gateway"));
+        // Backspace re-ranks too, so a mistyped tail never strands the cursor.
+        for ch in "zz".chars() {
+            picker.press(ch);
+        }
+        assert!(picker.candidates.is_empty());
+        picker.backspace();
+        picker.backspace();
+        assert_eq!(picker.selected, 0);
+        assert!(picker.accept().unwrap().ends_with("/api-gateway"));
+        // Ctrl+U restores the unranked listing with the cursor at the top.
+        picker.clear_query();
+        assert_eq!(picker.candidates[0].origin, Origin::Here);
+        assert_eq!(picker.selected, 0);
+    }
+
+    #[test]
+    fn arrows_still_move_the_highlight_after_typing() {
+        let root = empty_workspace(&["code-review-bot", "code-reviewer"]);
+        let mut picker = DirPicker::open(root.path().to_string_lossy().to_string(), Vec::new());
+        for ch in "code-rev".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.candidates.len(), 2);
+        let best = picker.candidates[0].path.clone();
+        picker.move_selection(1);
+        assert_ne!(picker.candidates[picker.selected].path, best);
+        picker.move_selection(-1);
+        assert_eq!(picker.candidates[picker.selected].path, best);
+        // An explicit refresh keeps the operator's row, a query edit does not.
+        picker.move_selection(1);
+        let moved = picker.candidates[picker.selected].path.clone();
+        assert_ne!(moved, best);
+        picker.rebuild();
+        assert_eq!(picker.candidates[picker.selected].path, moved);
+        picker.backspace();
+        assert_eq!(picker.selected, 0);
+        assert_eq!(picker.candidates[picker.selected].path, best);
+    }
+
+    #[test]
+    fn unicode_editing_stays_whole_and_matches_either_case() {
+        let root = empty_workspace(&["Ünïcödé-app", "api-gateway"]);
+        let mut picker = DirPicker::open(root.path().to_string_lossy().to_string(), Vec::new());
+        for ch in "ÜNÏ".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.selected, 0);
+        assert!(picker.accept().unwrap().ends_with("/Ünïcödé-app"));
+        // One backspace removes one character, not one byte.
+        picker.backspace();
+        assert_eq!(picker.query, "ÜN");
+        assert!(picker.accept().unwrap().ends_with("/Ünïcödé-app"));
+        for ch in "ÏCÖDÉ".chars() {
+            picker.press(ch);
+        }
+        assert!(picker.accept().unwrap().ends_with("/Ünïcödé-app"));
+        assert!(fuzzy_score("ünïcödé", "Ünïcödé-app").unwrap() >= PREFIX);
+    }
+
+    #[test]
+    fn unicode_query_that_matches_nothing_recovers_by_editing() {
+        let root = empty_workspace(&["Ünïcödé-app", "plain"]);
+        let mut picker = DirPicker::open(root.path().to_string_lossy().to_string(), Vec::new());
+        for ch in "Ünïcödé-ápp".chars() {
+            picker.press(ch);
+        }
+        assert!(picker.candidates.is_empty());
+        assert!(picker.accept().is_none());
+        picker.backspace();
+        picker.backspace();
+        assert!(picker.candidates.is_empty());
+        picker.backspace();
+        assert_eq!(picker.accept().unwrap(), path(root.path(), "Ünïcödé-app"));
+        assert_eq!(picker.selected, 0);
+    }
+
+    #[test]
     fn agent_picker_creates_with_the_kiro_default_before_any_reply() {
         let (mut picker, handle) = test_picker("/tmp".into(), 1, Duration::from_millis(50));
         assert!(picker.loading());
@@ -871,6 +1190,119 @@ mod tests {
     }
 
     #[test]
+    fn agent_typing_ranks_profiles_and_enter_needs_no_arrow() {
+        let (mut picker, handle) = test_picker("/tmp".into(), 1, Duration::from_millis(50));
+        picker.apply(kiro::AgentScan {
+            token: 1,
+            cwd: "/tmp".into(),
+            result: Ok(kiro::AgentList {
+                names: vec![
+                    "review-bot".into(),
+                    "code-reviewer".into(),
+                    "planner".into(),
+                ],
+                truncated: false,
+                unrecognized: false,
+            }),
+        });
+        // Discovery order is kept until an actual fragment is typed.
+        assert_eq!(picker.options[1], Some("review-bot".into()));
+        assert_eq!(picker.accept(), Accepted::Default);
+        for ch in "rev".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.selected, 1);
+        assert_eq!(picker.accept(), Accepted::Agent("review-bot".into()));
+        for ch in "iewer".chars() {
+            picker.press(ch);
+        }
+        // Only a word-start match of the longer fragment survives.
+        assert_eq!(picker.options, vec![None, Some("code-reviewer".into())]);
+        assert_eq!(picker.accept(), Accepted::Agent("code-reviewer".into()));
+        // Backspacing re-ranks: the prefix match is the top row again.
+        for _ in 0..4 {
+            picker.backspace();
+        }
+        assert_eq!(
+            picker.options,
+            vec![
+                None,
+                Some("review-bot".into()),
+                Some("code-reviewer".into())
+            ]
+        );
+        assert_eq!(picker.selected, 1);
+        assert_eq!(picker.accept(), Accepted::Agent("review-bot".into()));
+        drop(handle);
+    }
+
+    #[test]
+    fn agent_editing_replaces_a_stale_highlight_and_a_late_reply_keeps_one() {
+        let (mut picker, handle) = test_picker("/tmp".into(), 1, Duration::from_millis(50));
+        // Typing before discovery lands keeps Enter usable.
+        for ch in "rev".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.accept(), Accepted::Manual("rev".into()));
+        picker.apply(kiro::AgentScan {
+            token: 1,
+            cwd: "/tmp".into(),
+            result: Ok(kiro::AgentList {
+                names: vec![
+                    "planner".into(),
+                    "code-reviewer".into(),
+                    "review-bot".into(),
+                ],
+                truncated: false,
+                unrecognized: false,
+            }),
+        });
+        // The late reply highlights the best ranked profile.
+        assert_eq!(picker.selected, 1);
+        assert_eq!(picker.options[1], Some("review-bot".into()));
+        assert_eq!(picker.accept(), Accepted::Agent("review-bot".into()));
+        // A manual arrow move is replaced by the new best match on typing.
+        picker.move_selection(1);
+        assert_eq!(picker.accept(), Accepted::Agent("code-reviewer".into()));
+        for ch in "-b".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.selected, 1);
+        assert_eq!(picker.accept(), Accepted::Agent("review-bot".into()));
+        drop(handle);
+    }
+
+    #[test]
+    fn agent_unicode_query_and_manual_fallback_stay_explicit() {
+        let (mut picker, handle) = test_picker("/tmp".into(), 2, Duration::from_millis(50));
+        picker.apply(kiro::AgentScan {
+            token: 2,
+            cwd: "/tmp".into(),
+            result: Ok(kiro::AgentList {
+                names: vec!["Ünïcödé-review".into(), "planner".into()],
+                truncated: false,
+                unrecognized: false,
+            }),
+        });
+        for ch in "ünï".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.selected, 1);
+        assert_eq!(picker.accept(), Accepted::Agent("Ünïcödé-review".into()));
+        picker.backspace();
+        picker.backspace();
+        picker.backspace();
+        assert_eq!(picker.selected, 0);
+        assert_eq!(picker.accept(), Accepted::Default);
+        // A fragment that matches no discovered profile stays an explicit choice.
+        for ch in "ünïzzz".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.accept(), Accepted::Manual("ünïzzz".into()));
+        drop(handle);
+    }
+
+    #[test]
     fn discovery_failure_is_recoverable_text_not_a_panic() {
         let (mut picker, handle) = test_picker("/tmp".into(), 4, Duration::from_millis(50));
         picker.apply(kiro::AgentScan {
@@ -898,5 +1330,12 @@ mod tests {
         }));
         assert!(picker.names.is_empty());
         drop(handle);
+    }
+    #[test]
+    fn unicode_before_a_word_boundary_does_not_confuse_byte_and_character_offsets() {
+        assert!(
+            fuzzy_score("review", "é-reviewer").unwrap()
+                > fuzzy_score("review", "xxreviewer").unwrap()
+        );
     }
 }

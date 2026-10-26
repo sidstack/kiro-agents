@@ -20,4 +20,4 @@ No matching sessions. Ctrl+N creates a fresh session.
 
 
 ↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh
-Ctrl+N create · Ctrl+K stop · q/Ctrl+Q quit (sessions stay alive)
+Ctrl+N create · F2 rename · Ctrl+K stop · q/Ctrl+Q quit

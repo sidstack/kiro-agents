@@ -4,7 +4,7 @@
 Takes the versioned archive produced by scripts/package_release.py, verifies the
 adjacent SHA256SUMS entry, rejects unsafe or unexpected archive members and then
 extracts it into a temporary directory. The extracted executable must report the
-expected identity and pass all six existing integration scripts. Only fake Kiro
+expected identity and pass all existing integration scripts. Only fake Kiro
 and temporary state are reachable: HOME and KIRO_HOME point at a throwaway
 directory so no real Kiro or application configuration is touched.
 """
@@ -24,7 +24,8 @@ TARGET = 'x86_64-unknown-linux-gnu'
 EXECUTABLE = 'kiro-agents'
 DOCS = ('LICENSE', 'README.md', 'CHANGELOG.md')
 SCRIPTS = ('terminal_smoke.py', 'board_smoke.py', 'board_errors.py',
-           'board_handoff.py', 'board_ack.py', 'board_picker.py')
+           'board_handoff.py', 'board_ack.py', 'board_picker.py',
+           'board_search.py', 'board_naming.py')
 MODES = {EXECUTABLE: 0o755, **{doc: 0o644 for doc in DOCS}}
 VERSION_RE = re.compile(r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)'
                         r'(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z')

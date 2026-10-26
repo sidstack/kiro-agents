@@ -60,6 +60,9 @@ def remaining_output(master):
 with tempfile.TemporaryDirectory(prefix="kiro-terminal-test-") as scratch:
     env = dict(os.environ, KIRO_AGENTS_HOME=scratch + "/state",
                KIRO_AGENTS_KIRO_BIN=str(ROOT / "tests/fake-kiro/kiro-cli"), TERM="xterm-256color")
+    env["KIRO_HOME"] = env["KIRO_AGENTS_HOME"] + "/kiro"
+    env["KIRO_SESSIONS_DIR"] = env["KIRO_HOME"] + "/sessions/cli"
+    env["KIRO_AGENT_CONFIG_DIR"] = env["KIRO_HOME"] + "/agents"
 
     def call(*args):
         return subprocess.check_output([str(BINARY), *args], env=env, timeout=8)

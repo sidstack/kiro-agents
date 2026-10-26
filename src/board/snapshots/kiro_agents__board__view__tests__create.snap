@@ -16,8 +16,8 @@ Kiro sessions
   │                                                                                              │
   │                                                                                              │
   │                                                                                              │
-  │↑/↓ select · Enter choose · Tab/→ browse · ← parent                                           │
-  │Type to filter · Ctrl+U clear · Ctrl+R rescan · Esc cancel                                    │
+  │Type a fuzzy query · Enter chooses best match · ↑/↓ optional                                  │
+  │Tab/→ browse · ← parent · Backspace edit · Ctrl+U clear · Esc cancel                          │
   │Choose a directory, then choose its native Kiro agent.                                        │
   │                                                                                              │
   └──────────────────────────────────────────────────────────────────────────────────────────────┘

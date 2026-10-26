@@ -30,6 +30,10 @@ enum Mode {
         picker: AgentPicker,
     },
     Stop(String),
+    Rename {
+        id: String,
+        query: String,
+    },
 }
 
 enum Effect {
@@ -38,6 +42,7 @@ enum Effect {
     Attach(String),
     Create { cwd: String, agent: Option<String> },
     Stop(String),
+    Rename { id: String, name: Option<String> },
 }
 
 struct App {
@@ -49,9 +54,18 @@ struct App {
 }
 
 impl App {
-    fn key(&mut self, key: KeyEvent) -> Option<Effect> {
+    fn key(&mut self, mut key: KeyEvent) -> Option<Effect> {
         if key.kind == KeyEventKind::Release {
             return None;
+        }
+        // Legacy terminals/Guacamole encode BS as Ctrl+Backspace or Ctrl+H.
+        // Normalize before the control-shortcut guard so editing is not swallowed.
+        if key.code == KeyCode::Backspace
+            || matches!(key.code, KeyCode::Char('\u{8}' | '\u{7f}'))
+            || (key.code == KeyCode::Char('h') && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
+            key.code = KeyCode::Backspace;
+            key.modifiers = KeyModifiers::NONE;
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
@@ -81,6 +95,7 @@ impl App {
                 }
                 KeyCode::Char('u') => {
                     match &mut self.mode {
+                        Mode::Rename { query, .. } => query.clear(),
                         Mode::Directory(picker) => picker.clear_query(),
                         Mode::Agent { picker, .. } => {
                             picker.query.clear();
@@ -107,6 +122,15 @@ impl App {
         }
         match &mut self.mode {
             Mode::Browse => match key.code {
+                KeyCode::F(2) => {
+                    if let Some(row) = self.board.selected() {
+                        self.mode = Mode::Rename {
+                            id: row.id.clone(),
+                            query: row.name.clone().unwrap_or_default(),
+                        };
+                        self.message.clear();
+                    }
+                }
                 KeyCode::Char('q') => return Some(Effect::Quit),
                 KeyCode::Up | KeyCode::Char('k') => self.board.move_selection(-1),
                 KeyCode::Down | KeyCode::Char('j') => self.board.move_selection(1),
@@ -212,6 +236,35 @@ impl App {
                     };
                     self.scan = None;
                     return Some(effect);
+                }
+                _ => (),
+            },
+            Mode::Rename { id, query } => match key.code {
+                KeyCode::Esc => self.mode = Mode::Browse,
+                KeyCode::Backspace => {
+                    query.pop();
+                }
+                KeyCode::Char(ch) if !ch.is_control() => {
+                    if query.chars().count() < 80 {
+                        query.push(ch);
+                    }
+                }
+                KeyCode::Enter => {
+                    let name = if query.trim().is_empty() {
+                        None
+                    } else {
+                        match crate::features::validate_name(query) {
+                            Ok(name) => Some(name),
+                            Err(error) => {
+                                self.message = error.to_string();
+                                return None;
+                            }
+                        }
+                    };
+                    return Some(Effect::Rename {
+                        id: id.clone(),
+                        name,
+                    });
                 }
                 _ => (),
             },
@@ -362,6 +415,15 @@ pub fn run(dir: &Path) -> Result<()> {
                 dirty = true;
                 last_refresh = Instant::now();
             }
+            Some(Effect::Rename { id, name }) => {
+                match host::call(dir, Action::Rename { id, name }, false) {
+                    Ok(Reply::Ok) => { app.mode = Mode::Browse; app.message = "Session name updated.".into(); }
+                    Ok(_) => app.message = "Unexpected rename response".into(),
+                    Err(error) => app.message = format!("Rename failed: {error:#}. Older hosts require an explicit restart when safe."),
+                }
+                refresh = Some(refresh_task(dir));
+                dirty = true;
+            }
             Some(Effect::Stop(id)) => {
                 match host::call(dir, Action::Stop { id }, false) {
                     Ok(Reply::Ok) => app.message = "Session stopped.".into(),
@@ -382,7 +444,7 @@ pub fn run(dir: &Path) -> Result<()> {
                         match host::call(dir, Action::New { cwd, agent }, true) {
                             Ok(Reply::Created(row)) => {
                                 let id = row.id.clone();
-                                app.board.rows.push(row);
+                                app.board.rows.push(*row);
                                 app.board.set_query(String::new());
                                 app.board.select_id(&id);
                                 app.mode = Mode::Browse;
@@ -441,6 +503,9 @@ mod tests {
         let mut board = Board::default();
         board.all = true;
         board.replace_rows(vec![SessionInfo {
+            name: None,
+            title: None,
+            title_source: None,
             id: "selected".into(),
             cwd: "/tmp".into(),
             agent: None,
@@ -563,5 +628,51 @@ mod tests {
         app.mode = Mode::Stop("selected".into());
         assert!(app.key(create).is_none());
         assert!(matches!(&app.mode, Mode::Stop(id) if id == "selected"));
+    }
+    #[test]
+    fn both_backspace_encodings_edit_directory_agent_search_and_names() {
+        for backspace in [
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
+        ] {
+            let mut app = app("live");
+            app.mode = Mode::Directory(DirPicker::open("/tmp".into(), Vec::new()));
+            app.key(key(KeyCode::Char('Ü')));
+            app.key(backspace);
+            assert!(matches!(&app.mode, Mode::Directory(picker) if picker.query.is_empty()));
+            app.mode = agent_mode();
+            app.key(key(KeyCode::Char('Ü')));
+            app.key(backspace);
+            assert!(matches!(&app.mode, Mode::Agent {picker, ..} if picker.query.is_empty()));
+            app.mode = Mode::Search;
+            app.key(key(KeyCode::Char('Ü')));
+            app.key(backspace);
+            assert!(app.board.query.is_empty());
+            app.mode = Mode::Rename {
+                id: "selected".into(),
+                query: "Ü".into(),
+            };
+            app.key(backspace);
+            assert!(matches!(&app.mode, Mode::Rename {query, ..} if query.is_empty()));
+        }
+    }
+
+    #[test]
+    fn rename_is_explicit_and_clearing_restores_automatic_titles() {
+        let mut app = app("live");
+        app.key(key(KeyCode::F(2)));
+        assert!(matches!(app.mode, Mode::Rename { .. }));
+        app.key(key(KeyCode::Char('n')));
+        assert!(
+            matches!(app.key(key(KeyCode::Enter)), Some(Effect::Rename {name:Some(name),..}) if name == "n")
+        );
+        app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert!(matches!(
+            app.key(key(KeyCode::Enter)),
+            Some(Effect::Rename { name: None, .. })
+        ));
+        app.key(key(KeyCode::Esc));
+        assert!(matches!(app.mode, Mode::Browse));
     }
 }

@@ -1,3 +1,5 @@
+pub mod titles;
+
 use portable_pty::CommandBuilder;
 use serde_json::Value;
 use std::{
@@ -37,14 +39,18 @@ pub const LIST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LIST_BYTES: usize = 256 * 1024;
 /// Only this many agent names are offered in one picker listing.
 pub const MAX_AGENTS: usize = 200;
+/// Cap on profile files examined per scope directory during the file fallback.
+const MAX_PROFILE_FILES: usize = 500;
+/// Only this many leading bytes of a profile file are read to find its name.
+const MAX_PROFILE_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentList {
     pub names: Vec<String>,
     /// True when Kiro returned more rows than the picker keeps.
     pub truncated: bool,
-    /// True when Kiro's output shape is unknown, so the picker offers no
-    /// names and falls back to the Kiro default plus explicit typing.
+    /// True when the native listing is unavailable/unrecognized; scoped files
+    /// may still supply candidates, with a visible fallback status.
     pub unrecognized: bool,
 }
 
@@ -62,6 +68,67 @@ pub enum ListError {
     Failed { code: Option<i32> },
     #[error("Kiro agent listing produced too much output. Type an agent name instead.")]
     TooLarge,
+}
+
+/// Locations of the Kiro profile scopes for one cwd, snapshotted from the
+/// environment once per discovery. Kiro documents `KIRO_AGENT_CONFIG_DIR` as a
+/// global scan override that replaces the workspace scan. Tests construct a
+/// scope explicitly instead of mutating the process environment.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct ProfileScope {
+    /// `<cwd>/.kiro/agents`, absent when the override replaces the scan.
+    workspace: Option<std::path::PathBuf>,
+    /// `$KIRO_AGENT_CONFIG_DIR`, else `$KIRO_HOME/agents`, else `~/.kiro/agents`.
+    global: Option<std::path::PathBuf>,
+}
+
+fn non_empty(var: &str) -> Option<std::path::PathBuf> {
+    env::var_os(var)
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
+impl ProfileScope {
+    fn from_env(cwd: &Path) -> Self {
+        if let Some(dir) = non_empty("KIRO_AGENT_CONFIG_DIR") {
+            return Self {
+                workspace: None,
+                global: Some(dir),
+            };
+        }
+        let global = non_empty("KIRO_HOME")
+            .map(|home| home.join("agents"))
+            .or_else(|| non_empty("HOME").map(|home| home.join(".kiro").join("agents")));
+        let modern_workspace = cwd.join(".kiro/agents");
+        let legacy_workspace = cwd.join(".amazonq/cli-agents");
+        let workspace = if !modern_workspace.exists() && legacy_workspace.exists() {
+            legacy_workspace
+        } else {
+            modern_workspace
+        };
+        let global = global.map(|modern| {
+            if non_empty("KIRO_HOME").is_none() && !modern.exists() {
+                if let Some(home) = non_empty("HOME") {
+                    let legacy = home.join(".aws/amazonq/cli-agents");
+                    if legacy.exists() {
+                        return legacy;
+                    }
+                }
+            }
+            modern
+        });
+        Self {
+            workspace: Some(workspace),
+            global,
+        }
+    }
+
+    /// Scopes in precedence order: workspace first, then global.
+    fn dirs(&self) -> impl Iterator<Item = &Path> {
+        [self.workspace.as_deref(), self.global.as_deref()]
+            .into_iter()
+            .flatten()
+    }
 }
 
 /// Capture Kiro's agent listing for `cwd` without ever writing to the terminal:
@@ -178,12 +245,227 @@ fn capture_agent_list_cancel(
     result
 }
 
+/// Full discovery for one cwd: Kiro's own capability command first, then a
+/// bounded read-only scan of the genuine scoped profile files. The file scan
+/// supplements CLI results (the listing is login-gated and can omit profiles
+/// Kiro would still accept) and is the only source when the command fails.
+/// Nothing is ever written. Nested names are bounded; directory symlinks are
+/// never traversed, and profile-file symlinks are read only within the file budget.
+fn discover_agents_in(
+    cwd: &Path,
+    program: impl AsRef<OsStr>,
+    timeout: Duration,
+    cancelled: &AtomicBool,
+    scope: &ProfileScope,
+) -> Result<AgentList, ListError> {
+    let cli = capture_agent_list_cancel(cwd, program, timeout, cancelled);
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(ListError::Cancelled);
+    }
+    if let Err(error @ (ListError::Cancelled | ListError::TooLarge)) = cli {
+        return Err(error);
+    }
+    let mut fallback = Vec::new();
+    let mut scan_hit_cap = false;
+    for dir in scope.dirs() {
+        scan_profiles_cancel(dir, &mut fallback, &mut scan_hit_cap, cancelled);
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(ListError::Cancelled);
+        }
+    }
+    match cli {
+        Ok(mut list) => {
+            for name in fallback {
+                push_name(&name, &mut list.names);
+            }
+            list.truncated |= scan_hit_cap || list.names.len() > MAX_AGENTS;
+            list.names.truncate(MAX_AGENTS);
+            Ok(list)
+        }
+        // Cancellation must stay immediate and oversized output stays unsafe;
+        // every other listing failure falls back to the scoped files.
+        Err(error @ (ListError::Cancelled | ListError::TooLarge)) => Err(error),
+        Err(error) => {
+            if fallback.is_empty() {
+                return Err(error);
+            }
+            let truncated = scan_hit_cap || fallback.len() > MAX_AGENTS;
+            fallback.truncate(MAX_AGENTS);
+            Ok(AgentList {
+                names: fallback,
+                truncated,
+                unrecognized: true,
+            })
+        }
+    }
+}
+
+/// Bounded traversal of profile scopes, including documented team/name profiles.
+/// Symlinked files are read-only candidates; symlinked directories are never walked.
+fn scan_profiles_cancel(
+    dir: &Path,
+    names: &mut Vec<String>,
+    hit_cap: &mut bool,
+    cancelled: &AtomicBool,
+) {
+    let mut pending = vec![(dir.to_owned(), 0usize)];
+    let mut examined = 0usize;
+    let mut bytes = 0u64;
+    while let Some((current, depth)) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        let mut entries_sorted = Vec::new();
+        for entry in entries {
+            if cancelled.load(Ordering::Relaxed) {
+                return;
+            }
+            if examined >= MAX_PROFILE_FILES {
+                *hit_cap = true;
+                break;
+            }
+            examined += 1;
+            let Ok(entry) = entry else { continue };
+            entries_sorted.push(entry.path());
+        }
+        entries_sorted.sort();
+        for path in entries_sorted {
+            if cancelled.load(Ordering::Relaxed) {
+                return;
+            }
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with('.'))
+            {
+                continue;
+            }
+            let Ok(link_info) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if link_info.is_dir() {
+                if depth < 4 {
+                    pending.push((path, depth + 1));
+                } else {
+                    *hit_cap = true;
+                }
+                continue;
+            }
+            // Follow a profile-file symlink only; never recurse through one.
+            let Ok(info) = std::fs::metadata(&path) else {
+                continue;
+            };
+            if !info.is_file() {
+                continue;
+            }
+            if !matches!(
+                path.extension().and_then(|x| x.to_str()),
+                Some("json" | "md")
+            ) {
+                continue;
+            }
+            if info.len() > MAX_PROFILE_BYTES || bytes + info.len() > 8 * 1024 * 1024 {
+                *hit_cap = true;
+                continue;
+            }
+            bytes += info.len();
+            if let Some(mut name) = profile_name(&path) {
+                if let Ok(relative) = path.strip_prefix(dir) {
+                    if relative.components().count() > 1 {
+                        let relative = relative.with_extension("");
+                        let Some(text) = relative.to_str() else {
+                            continue;
+                        };
+                        if text.starts_with('-') || text.chars().any(char::is_control) {
+                            continue;
+                        }
+                        name = text.to_owned();
+                    }
+                }
+                push_name(&name, names);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn scan_profile_dir(dir: &Path, names: &mut Vec<String>, hit_cap: &mut bool) {
+    scan_profiles_cancel(dir, names, hit_cap, &AtomicBool::new(false));
+}
+
+/// Name a genuine profile file declares: `.json` `"name"`, `.md` frontmatter
+/// `name:`, otherwise the file stem (Kiro's profile identity is its filename).
+/// Nothing is synthesized: only names present in the user's own files.
+fn profile_name(path: &Path) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    // Lock files, leases and drafts start with '.'; only .json/.md are profiles.
+    if file_name.starts_with('.') {
+        return None;
+    }
+    let extension = path.extension()?.to_str()?;
+    if !matches!(extension, "json" | "md") {
+        return None;
+    }
+    let stem = path.file_stem()?.to_str()?;
+    let Ok(file) = std::fs::File::open(path) else {
+        return None;
+    };
+    let mut buffer = Vec::new();
+    let mut taken = file.take(MAX_PROFILE_BYTES);
+    if taken.read_to_end(&mut buffer).is_err() {
+        return None;
+    }
+    let text = std::str::from_utf8(&buffer).ok()?;
+    let declared = if extension == "json" {
+        let value = serde_json::from_str::<Value>(text.trim()).ok()?;
+        if !value.is_object() {
+            return None;
+        }
+        value.get("name").and_then(Value::as_str).map(str::to_owned)
+    } else {
+        frontmatter_name(text)
+    };
+    // A declared name must itself be usable; otherwise the genuine file stem
+    // is the fallback. Nothing is invented when both are unusable.
+    let declared = declared.filter(|name| usable_profile_name(name));
+    let candidate = declared.as_deref().unwrap_or(stem);
+    usable_profile_name(candidate).then(|| candidate.to_owned())
+}
+
+fn frontmatter_name(text: &str) -> Option<String> {
+    let mut lines = text.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    for line in lines.take(100) {
+        let line = line.trim_end();
+        if line == "---" || line == "..." {
+            break;
+        }
+        if let Some(value) = line.strip_prefix("name:") {
+            let value = value.trim().trim_matches(|ch| ch == '"' || ch == '\'');
+            if !value.is_empty() {
+                return Some(value.to_owned());
+            }
+        }
+    }
+    None
+}
+
+fn usable_profile_name(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty()
+        && !name.starts_with('-')
+        && !name.contains('/')
+        && name.chars().all(|ch| !ch.is_control())
+}
+
 /// Extract agent names from plausible `agent list --format json-pretty` shapes.
 ///
 /// The exact schema is unverified (findings: profile enumeration is blocked by
 /// login), so only name-bearing JSON is accepted. An unknown shape yields no
-/// names: the picker then offers the Kiro default and explicit typing rather
-/// than inventing profiles.
+/// names: discovery then supplements from the genuine scoped profile files
+/// rather than inventing profiles.
 pub fn parse_agent_names(text: &str) -> Vec<String> {
     let value: Value = match serde_json::from_str(text.trim()) {
         Ok(value) => value,
@@ -242,6 +524,16 @@ fn push_name(name: &str, names: &mut Vec<String>) {
     }
 }
 
+/// Bounded list of declared profile names in one directory, for tests and
+/// diagnostics. Discovery itself uses [`discover_agents`].
+#[cfg(test)]
+fn profile_names_in(dir: &Path) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut hit_cap = false;
+    scan_profile_dir(dir, &mut names, &mut hit_cap);
+    names
+}
+
 /// Let the explicit CLI command present Kiro's own listing and errors.
 /// The board uses captured asynchronous discovery instead.
 pub fn agents(cwd: &Path) -> anyhow::Result<()> {
@@ -284,14 +576,18 @@ impl Drop for AgentScanHandle {
 }
 
 pub fn spawn_agent_scan(token: u64, cwd: &str, timeout: Duration) -> AgentScanHandle {
-    spawn_agent_scan_using(token, cwd, timeout, executable())
+    let scope = ProfileScope::from_env(Path::new(cwd));
+    spawn_agent_scan_using(token, cwd, timeout, executable(), scope)
 }
 
+/// Test seam: discovery with an explicit program and profile scope, so tests
+/// never read the ambient HOME/KIRO_HOME environment of a parallel run.
 fn spawn_agent_scan_using(
     token: u64,
     cwd: &str,
     timeout: Duration,
     program: std::ffi::OsString,
+    scope: ProfileScope,
 ) -> AgentScanHandle {
     let (sender, receiver) = mpsc::channel();
     let cwd = cwd.to_owned();
@@ -300,7 +596,7 @@ fn spawn_agent_scan_using(
     let worker = thread::spawn(move || {
         let path = Path::new(&cwd);
         let result = if path.is_dir() {
-            capture_agent_list_cancel(path, &program, timeout, &child_cancelled)
+            discover_agents_in(path, &program, timeout, &child_cancelled, &scope)
                 .map_err(|error| error.to_string())
         } else {
             Err("Project directory is unavailable".to_owned())
@@ -391,9 +687,17 @@ mod tests {
     // an open fixture-writer descriptor until exec, producing Linux ETXTBSY.
     static COMMAND_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        // A failed assertion must not poison the shared fixture lock and make
+        // every later command test report a bogus PoisonError.
+        COMMAND_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn parses_the_documented_and_plausible_shapes() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         // Shape the fake CLI fixture emits and the most likely real one.
         assert_eq!(
             parse_agent_names(r#"{"agents":[{"name":"reviewer"},{"name":"planner"}]}"#),
@@ -414,7 +718,7 @@ mod tests {
 
     #[test]
     fn unknown_shapes_yield_no_names_instead_of_invented_profiles() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         assert!(parse_agent_names("").is_empty());
         assert!(parse_agent_names("not json at all").is_empty());
         assert!(parse_agent_names("null").is_empty());
@@ -432,7 +736,7 @@ mod tests {
 
     #[test]
     fn captured_listing_never_touches_the_parent_terminal() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         let program = fake_kiro(dir.path(), r#"{"agents":[{"name":"reviewer"}]}"#);
         let list = capture_agent_list(dir.path(), &program, LIST_TIMEOUT).unwrap();
@@ -443,7 +747,7 @@ mod tests {
 
     #[test]
     fn failing_and_unrecognized_listings_are_recoverable_text() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         let program = dir.path().join("kiro-cli");
         fs::write(
@@ -464,7 +768,7 @@ mod tests {
 
     #[test]
     fn hung_listing_is_stopped_at_the_timeout() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         let program = dir.path().join("kiro-cli");
         fs::write(&program, "#!/bin/sh\nsleep 30\n").unwrap();
@@ -478,7 +782,7 @@ mod tests {
 
     #[test]
     fn oversized_listing_is_rejected_not_streamed() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         let program = dir.path().join("kiro-cli");
         fs::write(
@@ -493,7 +797,7 @@ mod tests {
 
     #[test]
     fn async_scan_reports_its_cwd_and_token() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         let program = fake_kiro(dir.path(), r#"{"agents":[{"name":"planner"}]}"#);
         let receiver = spawn_agent_scan_using(
@@ -501,6 +805,7 @@ mod tests {
             &dir.path().to_string_lossy(),
             LIST_TIMEOUT,
             program.into_os_string(),
+            ProfileScope::default(),
         );
         let scan = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(scan.token, 7);
@@ -510,7 +815,7 @@ mod tests {
 
     #[test]
     fn cancelling_scan_reaps_the_listing_child_promptly() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         let program = dir.path().join("kiro-cli");
         fs::write(
@@ -524,6 +829,7 @@ mod tests {
             &dir.path().to_string_lossy(),
             LIST_TIMEOUT,
             program.into_os_string(),
+            ProfileScope::default(),
         );
         let marker = dir.path().join("listing.pid");
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -550,7 +856,7 @@ mod tests {
 
     #[test]
     fn missing_directory_is_an_actionable_error() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         let receiver = spawn_agent_scan(
             1,
@@ -563,7 +869,7 @@ mod tests {
 
     #[test]
     fn empty_agent_container_is_a_valid_listing() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         let program = fake_kiro(dir.path(), r#"{"agents":[]}"#);
         let list = capture_agent_list(dir.path(), program, LIST_TIMEOUT).unwrap();
@@ -571,9 +877,263 @@ mod tests {
         assert!(!list.unrecognized);
     }
 
+    fn write_profile(dir: &Path, file: &str, body: &str) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join(file), body).unwrap();
+    }
+
+    fn failing_cli(dir: &Path) -> PathBuf {
+        let program = dir.join("kiro-cli");
+        fs::write(&program, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        program
+    }
+
+    #[test]
+    fn failed_listing_falls_back_to_genuine_scoped_profiles() {
+        let _guard = test_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let program = failing_cli(dir.path());
+        let workspace = dir.path().join(".kiro/agents");
+        let global = dir.path().join("home/.kiro/agents");
+        write_profile(&workspace, "reviewer.json", r#"{"name":"reviewer"}"#);
+        write_profile(&global, "planner.json", r#"{"name":"planner"}"#);
+        write_profile(
+            &global,
+            "kirocrew-guest.json",
+            r#"{"name":"kirocrew-guest"}"#,
+        );
+        let scope = ProfileScope {
+            workspace: Some(workspace),
+            global: Some(global),
+        };
+        let list = discover_agents_in(
+            dir.path(),
+            &program,
+            LIST_TIMEOUT,
+            &AtomicBool::new(false),
+            &scope,
+        )
+        .unwrap();
+        assert_eq!(list.names, ["reviewer", "kirocrew-guest", "planner"]);
+        assert!(!list.truncated && list.unrecognized);
+    }
+
+    #[test]
+    fn scoped_profiles_supplement_a_successful_listing() {
+        let _guard = test_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let program = fake_kiro(dir.path(), r#"{"agents":[{"name":"cli-agent"}]}"#);
+        let workspace = dir.path().join(".kiro/agents");
+        let global = dir.path().join("global-agents");
+        write_profile(&workspace, "reviewer.json", r#"{"name":"reviewer"}"#);
+        // The same profile installed globally must not create a second row.
+        write_profile(&global, "cli-agent.json", r#"{"name":"cli-agent"}"#);
+        let scope = ProfileScope {
+            workspace: Some(workspace),
+            global: Some(global),
+        };
+        let list = discover_agents_in(
+            dir.path(),
+            &program,
+            LIST_TIMEOUT,
+            &AtomicBool::new(false),
+            &scope,
+        )
+        .unwrap();
+        assert_eq!(list.names, ["cli-agent", "reviewer"]);
+    }
+
+    #[test]
+    fn agent_config_dir_override_replaces_the_workspace_scope() {
+        let _guard = test_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let program = failing_cli(dir.path());
+        write_profile(
+            &dir.path().join(".kiro/agents"),
+            "workspace-only.json",
+            r#"{"name":"workspace-only"}"#,
+        );
+        let override_dir = dir.path().join("override-agents");
+        write_profile(&override_dir, "aws-expert.json", r#"{"name":"aws-expert"}"#);
+        let scope = ProfileScope {
+            workspace: None,
+            global: Some(override_dir),
+        };
+        let list = discover_agents_in(
+            dir.path(),
+            &program,
+            LIST_TIMEOUT,
+            &AtomicBool::new(false),
+            &scope,
+        )
+        .unwrap();
+        assert_eq!(list.names, ["aws-expert"]);
+    }
+
+    #[test]
+    fn markdown_profiles_use_declared_frontmatter_names() {
+        let _guard = test_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let agents = dir.path().join("agents");
+        fs::create_dir_all(&agents).unwrap();
+        fs::write(
+            agents.join("review-persona.md"),
+            "---\nname: \"code-reviewer\"\ndescription: reads diffs\n---\nbody\n",
+        )
+        .unwrap();
+        fs::write(agents.join("plain.md"), "just a prompt, no frontmatter\n").unwrap();
+        assert_eq!(profile_names_in(&agents), ["plain", "code-reviewer"]);
+    }
+
+    #[test]
+    fn declared_json_name_wins_and_unreadable_or_hostile_files_are_skipped() {
+        let _guard = test_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let agents = dir.path().join("agents");
+        fs::create_dir_all(&agents).unwrap();
+        // Declared name overrides the file stem.
+        write_profile(&agents, "stem-name.json", r#"{"name":"declared-name"}"#);
+        // Missing name falls back to the genuine file stem.
+        write_profile(&agents, "stem-only.json", r#"{"model":"auto"}"#);
+        // Invalid and oversized JSON are skipped; incomplete bytes are not profiles.
+        write_profile(&agents, "broken.json", "not json at all");
+        let huge = format!(
+            "{{\"name\":\"deep\",\"prompt\":\"{}\"}}",
+            "x".repeat(300 * 1024)
+        );
+        write_profile(&agents, "huge.json", &huge);
+        // Hidden/other files are skipped. Nested names and file symlinks are supported.
+        fs::write(agents.join(".profile.lock"), "").unwrap();
+        fs::write(agents.join(".hidden.json"), r#"{"name":"hidden"}"#).unwrap();
+        fs::write(agents.join("notes.txt"), r#"{"name":"txt"}"#).unwrap();
+        let nested = agents.join("nested");
+        write_profile(&nested, "nested.json", r#"{"name":"nested"}"#);
+        let outside = tempfile::tempdir().unwrap();
+        write_profile(outside.path(), "linked.json", r#"{"name":"linked"}"#);
+        std::os::unix::fs::symlink(outside.path().join("linked.json"), agents.join("link.json"))
+            .unwrap();
+        // An unreadable scope contributes nothing instead of erroring.
+        let unreadable = dir.path().join("locked-agents");
+        write_profile(&unreadable, "secret.json", r#"{"name":"secret"}"#);
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+        let names = profile_names_in(&agents);
+        assert!(profile_names_in(&unreadable).is_empty());
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            names,
+            ["linked", "declared-name", "stem-only", "nested/nested"]
+        );
+        assert!(profile_names_in(&unreadable).contains(&"secret".to_owned()));
+        assert!(profile_names_in(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn unsafe_profile_names_are_rejected_not_offered() {
+        let _guard = test_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let agents = dir.path().join("agents");
+        write_profile(&agents, "-flag.json", r#"{"name":"-flag"}"#);
+        fs::write(agents.join("weird.json"), "{\"name\":\"a/b\"}").unwrap();
+        fs::write(agents.join("spacey.json"), "{\"name\":\"   \"}").unwrap();
+        // A declared name containing '/' or blank falls back to the genuine
+        // file stem; an unsafe stem (leading '-') yields nothing at all.
+        assert_eq!(profile_names_in(&agents), ["spacey", "weird"]);
+    }
+
+    #[test]
+    fn listing_failure_without_profiles_still_reports_the_failure() {
+        let _guard = test_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let program = failing_cli(dir.path());
+        let scope = ProfileScope {
+            workspace: Some(dir.path().join(".kiro/agents")),
+            global: Some(dir.path().join("home/.kiro/agents")),
+        };
+        let error = discover_agents_in(
+            dir.path(),
+            &program,
+            LIST_TIMEOUT,
+            &AtomicBool::new(false),
+            &scope,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ListError::Failed { .. }), "{error}");
+    }
+
+    #[test]
+    fn cancellation_and_oversized_output_never_take_the_fallback_path() {
+        let _guard = test_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let scope = ProfileScope {
+            workspace: Some(dir.path().join(".kiro/agents")),
+            global: None,
+        };
+        write_profile(
+            &dir.path().join(".kiro/agents"),
+            "reviewer.json",
+            r#"{"name":"reviewer"}"#,
+        );
+        let program = dir.path().join("kiro-cli");
+        fs::write(&program, "#!/bin/sh\nsleep 30\n").unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        let error = discover_agents_in(
+            dir.path(),
+            &program,
+            Duration::from_millis(200),
+            &AtomicBool::new(true),
+            &scope,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ListError::Cancelled), "{error}");
+
+        let program = dir.path().join("kiro-cli-2");
+        fs::write(
+            &program,
+            "#!/bin/sh\nyes '{\"agents\":[{\"name\":\"x\"}],' | head -c 400000\n",
+        )
+        .unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        let error = discover_agents_in(
+            dir.path(),
+            &program,
+            LIST_TIMEOUT,
+            &AtomicBool::new(false),
+            &scope,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ListError::TooLarge), "{error}");
+    }
+
+    #[test]
+    fn scan_reports_truncation_when_the_file_cap_is_hit() {
+        let _guard = test_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let agents = dir.path().join("agents");
+        fs::create_dir_all(&agents).unwrap();
+        for index in 0..=MAX_PROFILE_FILES {
+            fs::write(agents.join(format!("profile-{index}.json")), "{}").unwrap();
+        }
+        let scope = ProfileScope {
+            workspace: None,
+            global: Some(agents),
+        };
+        let program = failing_cli(dir.path());
+        let list = discover_agents_in(
+            dir.path(),
+            &program,
+            LIST_TIMEOUT,
+            &AtomicBool::new(false),
+            &scope,
+        )
+        .unwrap();
+        assert_eq!(list.names.len(), MAX_AGENTS);
+        assert!(list.truncated);
+    }
+
     #[test]
     fn directory_scan_caps_examined_entries_even_when_none_are_directories() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         for index in 0..2100 {
             fs::write(dir.path().join(format!("file-{index}")), "").unwrap();
@@ -585,7 +1145,7 @@ mod tests {
 
     #[test]
     fn listing_is_bounded_skips_heavy_trees_and_ignores_symlinks() {
-        let _guard = COMMAND_TEST_LOCK.lock().unwrap();
+        let _guard = test_guard();
         let dir = tempfile::tempdir().unwrap();
         for name in ["b", "a", "node_modules", ".git"] {
             fs::create_dir(dir.path().join(name)).unwrap();

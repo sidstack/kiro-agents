@@ -47,7 +47,7 @@ advisories and dependency updates. See [release policy](RELEASING.md).
 
 Branch beta builds use read-only tokens and run the full suite plus a strict audit
 before packaging. The extracted optimized executable is then exercised through all
-six fake-Kiro PTY scenarios. Publication runs separately from default-branch code:
+all fake-Kiro PTY scenarios. Publication runs separately from default-branch code:
 it checks the originating run, source SHA, beta version, filenames, archive members
 and checksum without executing the downloaded binary. Fork PRs cannot publish.
 Betas are explicit prereleases and do not replace latest stable; these checks do not
