@@ -160,3 +160,13 @@ manual names remain available. See `docs/SESSION-NAMES.md` for bounds and compat
 Installer changes must retain checksum/archive/version verification and atomic replacement,
 never require sudo or restart hosts. Tests use local mocked release downloads and a temporary
 installation directory; keep the default latest channel stable, with explicit beta selection.
+
+Optional workspace work lives on feat/tmux-workspaces: real external tmux owns panes,
+windows, scrollback and shells. Assemble the backend through WorkspaceFeature; keep
+session-host ownership independent. Never use the default/user tmux server or modify
+~/.tmux.conf; use only the private wrapper-state socket. Closing panes/workspaces must
+not stop managed Kiro sessions. See docs/WORKSPACES.md and docs/journal/MULTIPLEXER.md.
+
+Next-batch plans live in docs/BACKLOG.md: native historical-session resume and local
+fuzzy/full-text session quick-open, with separately verified V2/V3 store adapters.
+These are backlog items only; do not include them in the current multiplexer batch.

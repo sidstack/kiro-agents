@@ -122,6 +122,13 @@ Kiro loads your own profiles, steering, MCP, and permissions from the target cwd
 and its native configuration. The wrapper never writes Kiro configuration or
 profiles and never adds tool-trust flags.
 
+## Optional workspaces (feature branch)
+
+Tmux-backed panes/windows are being developed on `feat/tmux-workspaces`; see
+[workspace controls and boundaries](docs/WORKSPACES.md). They require tmux 3.2+
+and leave the standard dashboard available without that dependency. This branch
+uses native tmux for terminal rendering; no terminal emulator is added to the wrapper.
+
 ## What is validated
 
 - Rust format, strict Clippy, Rust unit/integration tests, and board snapshots.
