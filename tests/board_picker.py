@@ -16,6 +16,9 @@ with tempfile.TemporaryDirectory(prefix='kiro-picker-test-') as tmp:
                KIRO_AGENTS_KIRO_BIN=str(ROOT / 'tests/fake-kiro/kiro-cli'),
                KIRO_AGENTS_FAKE_AGENT_FIXTURE=str(fixture),
                KIRO_AGENTS_FAKE_AGENT_LIST_DELAY='1.2', TERM='xterm-256color')
+    env["KIRO_HOME"] = env["KIRO_AGENTS_HOME"] + "/kiro"
+    env["KIRO_SESSIONS_DIR"] = env["KIRO_HOME"] + "/sessions/cli"
+    env["KIRO_AGENT_CONFIG_DIR"] = env["KIRO_HOME"] + "/agents"
 
     def call(*args):
         return subprocess.check_output([str(BINARY), *args], env=env, timeout=8)

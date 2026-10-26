@@ -16,8 +16,8 @@ Kiro sessions
   │                                                                                              │
   │                                                                                              │
   │                                                                                              │
-  │↑/↓ select · Enter create · Type to filter or enter a name                                    │
-  │Ctrl+R retry · Ctrl+U clear · Esc back to directory                                           │
+  │Type a fuzzy query · Enter creates · ↑/↓ optional                                             │
+  │Backspace edits · Ctrl+R retry · Ctrl+U clear · Esc back                                      │
   │Choose a native agent or let Kiro apply its default.                                          │
   │                                                                                              │
   └──────────────────────────────────────────────────────────────────────────────────────────────┘

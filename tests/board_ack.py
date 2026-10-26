@@ -83,6 +83,9 @@ with tempfile.TemporaryDirectory(prefix='kiro-board-ack-') as tmp:
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', 25, 110, 0, 0))
         env = dict(os.environ, KIRO_AGENTS_HOME=tmp, TERM='xterm-256color')
+        env["KIRO_HOME"] = env["KIRO_AGENTS_HOME"] + "/kiro"
+        env["KIRO_SESSIONS_DIR"] = env["KIRO_HOME"] + "/sessions/cli"
+        env["KIRO_AGENT_CONFIG_DIR"] = env["KIRO_HOME"] + "/agents"
         os.execve(str(BINARY), [str(BINARY), 'board'], env)
     worker.start()
     try:

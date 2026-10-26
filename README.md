@@ -10,6 +10,27 @@ MVP v3 is the product iteration; sessions still launch Kiro’s V2 engine.
 
 ## Install
 
+Install the latest stable Linux x86_64 binary without Rust or sudo:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sidstack/kiro-agents/main/install.sh | sh
+```
+
+Select an exact stable or beta release, or choose an installation directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sidstack/kiro-agents/main/install.sh | sh -s -- --version v0.3.1-beta.15.1
+```
+
+Pass `--install-dir DIRECTORY` or `--uninstall` after `sh -s --` in the same command.
+From a source checkout, use `sh install.sh` with those flags directly.
+
+The installer requires Linux x86_64/glibc 2.35+, curl, tar and coreutils. It checks
+the release checksum, archive contents and executable version before atomically
+replacing the binary. Re-running upgrades it; uninstall removes only the executable.
+Hosts, sessions and Kiro configuration are left running and unchanged. Kiro CLI must
+be installed and authenticated separately. The manual download method follows.
+
 For pre-merge testing, branch CI publishes versioned `-beta.RUN.ATTEMPT` binaries
 as GitHub prereleases after integration tests and dependency auditing. Betas have
 the same installation steps; see [branch beta builds](docs/RELEASING.md#branch-beta-binaries).
@@ -71,18 +92,27 @@ The board requires an interactive input and output terminal; piped output is a
 plain session list. Up/Down or j/k selects, Enter attaches, Tab switches Live/All,
 and / searches. Esc clears search or cancels a form. Ctrl+N opens a directory picker
 with current/recent projects and filesystem browsing, followed by a searchable
-list of native Kiro agents for the chosen directory. Arrow keys and Enter select;
-typing filters the choices or supplies an explicit path. Tab or Right Arrow
+list of native Kiro agents for the chosen directory. Type a fuzzy query and press
+Enter to select the best match; arrow keys are optional. Both legacy BS and DEL
+Backspace encodings edit the query. Typing a path is also supported. Tab or Right Arrow
 browses a directory; Left Arrow goes to its parent;
 Ctrl+U clears the query and Ctrl+R retries discovery. Esc from the agent list goes
 back to the directory picker. Ctrl+K asks before stopping the selected live
-session. r refreshes; q or Ctrl+Q leaves sessions alive.
+session. F2 names a session; an empty name restores its automatic title. The board
+prefers a manual name, then an exactly matched native Kiro title, a short first-prompt
+title, and directory/agent as the fallback. See [session names](docs/SESSION-NAMES.md).
+r refreshes; q or Ctrl+Q leaves sessions alive.
 Exited, stopped, and failed rows explain why they cannot be attached.
 
 Agent discovery is captured asynchronously with a five-second deadline and a
 256 KiB output cap. Its JSON shapes are covered by fixtures; authenticated real
-Kiro enumeration remains unverified. Unsupported output or listing errors keep
-the default and an explicit typed-name choice available. No profile is invented.
+Kiro enumeration remains unverified. Scoped read-only profile discovery supplements
+CLI results and provides a fallback when listing fails or has an unsupported format.
+The Kiro default and an explicit typed-name choice remain available. No profile is invented.
+On accepted attach the board releases its alternate screen while keeping raw mode,
+so native Kiro has the same screen choice as direct invocation. Primary-screen output
+uses terminal scrollback; native full-screen history stays under Kiro's control.
+Wheel/PageUp input is passed through unchanged.
 Status refresh runs in the background; idle boards redraw only after changes.
 
 `new --no-attach` starts in the background. The host inherits the environment of
@@ -94,7 +124,7 @@ profiles and never adds tool-trust flags.
 
 ## What is validated
 
-- Rust format, strict Clippy, 44 unit/integration tests, and six board snapshots.
+- Rust format, strict Clippy, Rust unit/integration tests, and board snapshots.
 - Fake-CLI PTY checks: board navigation/search, create/profile selection, confirmed
   stop, switch with stable PIDs, native exit back to board, error recovery, detach,
   resize, byte forwarding, frontend SIGKILL survival, and terminal restoration.
@@ -128,8 +158,8 @@ original feedback and validation boundaries, and the
   refuses them. Inspect/resume history through Kiro itself. No automatic recovery
   spawn or signals to a saved PID.
 - The board shows process liveness, with Live and All filters. Historical rows
-  cannot be attached. No telemetry hooks, drafts, auto-naming, V3 support, or
-  settings system yet. No transcript or child-environment logging.
+  cannot be attached. No telemetry hooks, drafts, V3 support, or
+  general settings system yet. Automatic names are best-effort and optional. No transcript or child-environment logging.
 
 ## Develop
 

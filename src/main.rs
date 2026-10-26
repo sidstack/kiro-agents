@@ -30,6 +30,9 @@ enum Command {
         dir: PathBuf,
         #[arg(long)]
         agent: Option<String>,
+        /// Display name stored only in wrapper metadata
+        #[arg(long)]
+        name: Option<String>,
         /// Explicit V2 selection (V2 is the only supported generation)
         #[arg(long)]
         v2: bool,
@@ -42,6 +45,13 @@ enum Command {
     Status {
         #[arg(long)]
         json: bool,
+    },
+    /// Rename wrapper metadata, or clear the override to use an automatic title
+    Rename {
+        id: String,
+        name: Option<String>,
+        #[arg(long, conflicts_with = "name")]
+        clear: bool,
     },
     /// Stop one owned session
     Stop { id: String },
@@ -72,6 +82,7 @@ fn main() -> Result<()> {
         Command::New {
             dir: cwd,
             agent,
+            name,
             no_attach,
             ..
         } => {
@@ -82,8 +93,15 @@ fn main() -> Result<()> {
                 .to_str()
                 .context("Project path must be UTF-8")?
                 .to_owned();
+            let name = name
+                .map(|name| kiro_agents::features::validate_name(&name))
+                .transpose()?;
             let reply = host::call(&dir, Action::New { cwd, agent }, true)?;
             if let Reply::Created(session) = reply {
+                if let Some(name) = name {
+                    host::call(&dir, Action::Rename { id: session.id.clone(), name: Some(name) }, false)
+                        .with_context(|| format!("Session {} was created, but naming failed. An older live host may need an explicit restart after its sessions are stopped", session.id))?;
+                }
                 if !no_attach && io::stdin().is_terminal() && io::stdout().is_terminal() {
                     attach::run(&dir, session.id.clone()).with_context(|| {
                         format!(
@@ -113,6 +131,14 @@ fn main() -> Result<()> {
             } else {
                 display(&rows)?;
             }
+            Ok(())
+        }
+        Command::Rename { id, name, clear } => {
+            anyhow::ensure!(name.is_some() || clear, "Supply a name or --clear");
+            let name = name
+                .map(|name| kiro_agents::features::validate_name(&name))
+                .transpose()?;
+            host::call(&dir, Action::Rename { id, name }, false)?;
             Ok(())
         }
         Command::Stop { id } => {
@@ -157,9 +183,10 @@ fn display(rows: &[SessionInfo]) -> Result<()> {
     for session in rows {
         writeln!(
             output,
-            "{}  {:<8}  v2  {}  {}",
+            "{}  {:<8}  {}  ·  v2  {}  {}",
             session.id,
             session.state,
+            session.display_name(),
             session.agent.as_deref().unwrap_or("(Kiro default)"),
             session.cwd
         )?;

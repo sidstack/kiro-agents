@@ -105,7 +105,7 @@ impl Leader {
 enum Cleanup {
     // Standalone attach: hand a cooked, primary-screen shell back to the caller.
     Standalone,
-    // Board handoff: the board keeps raw mode and the alternate screen alive;
+    // Board handoff: the board keeps raw mode; native output owns its screen;
     // cleanup may only undo the child's private modes, never the screen or
     // input mode the board is still using.
     Board,
@@ -113,7 +113,7 @@ enum Cleanup {
 
 // Bytes that reset child-owned private modes on the way back to the board.
 // No DECRST 1049 (no shell flash), no raw-mode disable, no cursor
-// repositioning and no newline: the board redraws over the same screen.
+// repositioning and no newline: the board redraws after re-entering its alternate screen.
 // A natively exited child may have left the alternate screen, so re-enter it
 // (idempotent when the child is still holding it) for the board's redraw.
 fn board_cleanup_bytes(child_exited: bool) -> Vec<u8> {
@@ -187,7 +187,7 @@ pub fn run_with_interrupt(dir: &Path, id: String, interrupted: Arc<AtomicBool>) 
 /// Temporarily hand the terminal to a native session from a live board.
 ///
 /// The host acknowledges the attach before `on_handoff` runs, so the board
-/// can keep raw mode and the alternate screen alive the whole time: it
+/// can keep raw mode alive across the handoff: it
 /// suspends rendering in the callback (e.g. one clear for native output),
 /// the raw byte pump runs, then the callback returns and the board redraws.
 /// Terminal cleanup only resets child private input/screen modes; it never

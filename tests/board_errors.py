@@ -50,6 +50,9 @@ def scenario(oversized):
             (state / "registry.json").write_text(json.dumps(rows))
         env = dict(os.environ, KIRO_AGENTS_HOME=str(state), TERM="xterm-256color",
                    KIRO_AGENTS_KIRO_BIN=str(ROOT / "tests/fake-kiro/kiro-cli"))
+        env["KIRO_HOME"] = env["KIRO_AGENTS_HOME"] + "/kiro"
+        env["KIRO_SESSIONS_DIR"] = env["KIRO_HOME"] + "/sessions/cli"
+        env["KIRO_AGENT_CONFIG_DIR"] = env["KIRO_HOME"] + "/agents"
         host = subprocess.Popen([str(BINARY), "__host"], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         pid = None

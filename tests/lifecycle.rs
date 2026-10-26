@@ -38,7 +38,7 @@ impl Harness {
             cwd: self.dir.path().to_str().unwrap().into(),
             agent: agent.map(str::to_owned),
         }) {
-            Reply::Created(info) => info,
+            Reply::Created(info) => *info,
             other => panic!("Unexpected: {other:?}"),
         }
     }
@@ -82,6 +82,9 @@ fn spawn(dir: &Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_kiro-agents"))
         .arg("__host")
         .env("KIRO_AGENTS_HOME", dir.join("state"))
+        .env("KIRO_HOME", dir.join("kiro"))
+        .env("KIRO_SESSIONS_DIR", dir.join("kiro/sessions/cli"))
+        .env("KIRO_AGENT_CONFIG_DIR", dir.join("kiro/agents"))
         .env(
             "KIRO_AGENTS_KIRO_BIN",
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake-kiro/kiro-cli"),
@@ -240,4 +243,53 @@ fn missing_agent_exit_is_visible_and_invalid_cwd_does_not_spawn() {
     )
     .is_err());
     assert_eq!(harness.rows().len(), 1);
+}
+
+#[test]
+fn rename_is_metadata_only_persists_and_old_registries_remain_readable() {
+    let harness = Harness::new();
+    let session = harness.new_session(Some("reviewer"));
+    assert!(matches!(
+        harness.call(Action::Rename {
+            id: session.id.clone(),
+            name: Some("Fix session picker".into())
+        }),
+        Reply::Ok
+    ));
+    let named = harness
+        .rows()
+        .into_iter()
+        .find(|r| r.id == session.id)
+        .unwrap();
+    assert_eq!(named.name.as_deref(), Some("Fix session picker"));
+    assert_eq!(named.pid, session.pid);
+    assert_eq!(named.state, "live");
+    assert_eq!(named.agent, session.agent);
+    let saved: Vec<SessionInfo> =
+        serde_json::from_slice(&fs::read(harness.state().join("registry.json")).unwrap()).unwrap();
+    assert_eq!(saved[0].name.as_deref(), Some("Fix session picker"));
+    assert!(host::call(
+        &harness.state(),
+        Action::Rename {
+            id: session.id.clone(),
+            name: Some("\x1b[31mbad".into())
+        },
+        false
+    )
+    .is_err());
+    assert_eq!(
+        harness.rows()[0].name.as_deref(),
+        Some("Fix session picker")
+    );
+    assert!(matches!(
+        harness.call(Action::Rename {
+            id: session.id,
+            name: None
+        }),
+        Reply::Ok
+    ));
+    assert!(harness.rows()[0].name.is_none());
+    let legacy: SessionInfo = serde_json::from_str(r#"{"id":"old","cwd":"/tmp/project","agent":null,"generation":"v2","pid":null,"state":"exited","exit_code":0,"notice":null}"#).unwrap();
+    assert_eq!(legacy.display_name(), "project · Kiro default");
+    assert!(legacy.name.is_none() && legacy.title.is_none());
 }

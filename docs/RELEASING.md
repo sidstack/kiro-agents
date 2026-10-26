@@ -25,7 +25,7 @@ The local 0.1.0/0.2.0 MVP iterations were never published GitHub releases.
 Every push to a branch other than `main` runs **Branch beta**. It runs `make check`
 (Rust tests, snapshots, fake-Kiro PTY integration and packaging tests), a strict
 RustSec audit, then packages an optimized Linux x86_64 binary. The extracted binary
-must pass all six PTY integration scripts before the `beta-linux` artifact is uploaded.
+must pass all PTY integration scripts before the `beta-linux` artifact is uploaded.
 Fork pull requests get the same build/tests as a read-only artifact, without publication.
 No real Kiro authentication or paid model calls are used.
 
@@ -101,6 +101,15 @@ replaces that release's artifacts, without changing the version. Never pass an
 unreleased branch name. The packager refuses a tag/version/HEAD mismatch.
 
 ## Install a binary
+
+The root `install.sh` downloads latest stable or `--version VERSION` directly from
+GitHub Releases, checks SHA256SUMS and a regular-file archive allowlist, verifies
+`--version`, then atomically installs into ~/.local/bin (override with --install-dir).
+It supports exact beta tags and --uninstall, never uses sudo and never restarts a
+host or modifies Kiro state. It rejects unsupported architectures, musl and glibc
+older than the documented build baseline. See README for the one-line command.
+Installer regression tests use mocked HTTPS release fixtures; publication tests
+also exercise the installer against a real downloaded release in a temporary prefix.
 
 Download the archive and SHA256SUMS from the repository's GitHub Releases page.
 Use a tagged release, not a workflow artifact. For example, for v0.3.0:

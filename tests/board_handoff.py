@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Board <-> native handoff transitions in one live PTY.
 
-Regression for the old cooked/primary round trip: after the attach ACK the
-terminal stays raw and on the alternate screen the whole time. Attach-return
-cleanup may reset child private modes (the board may reset scroll margins)
-but must never emit DECRST 1049, a bottom-row shell cursor sequence or the
-standalone trailing newline. A native exit may leave the alternate screen;
-the board return must re-enter it (ENTER 1049h) without touching the shell.
+After ACK the board leaves its alternate screen while retaining raw mode. Plain
+native output therefore uses normal terminal scrollback; native TUIs may still
+choose their own alternate screen. Returning to the board resets private modes
+without a cooked-shell round trip or extra shell cursor/newline output.
 """
 import fcntl
 import json
@@ -114,6 +112,9 @@ with tempfile.TemporaryDirectory(prefix="kiro-handoff-test-") as scratch:
     env = dict(os.environ, KIRO_AGENTS_HOME=scratch + "/state",
                KIRO_AGENTS_KIRO_BIN=str(ROOT / "tests/fake-kiro/kiro-cli"),
                TERM="xterm-256color")
+    env["KIRO_HOME"] = env["KIRO_AGENTS_HOME"] + "/kiro"
+    env["KIRO_SESSIONS_DIR"] = env["KIRO_HOME"] + "/sessions/cli"
+    env["KIRO_AGENT_CONFIG_DIR"] = env["KIRO_HOME"] + "/agents"
 
     def call(*args):
         return subprocess.check_output([str(BINARY), *args], env=env, timeout=8)
@@ -132,7 +133,12 @@ with tempfile.TemporaryDirectory(prefix="kiro-handoff-test-") as scratch:
         board.frames = b""
         board.press(b"\r")
         board.wait(b"READY:")
-        forbid(board.frames, "attach")
+        assert board.frames.count(LEAVE_ALT) == 1, "Board must release alternate screen once after ACK"
+        handoff = board.frames.index(LEAVE_ALT)
+        ready = board.frames.index(b"READY:")
+        assert handoff < ready and ENTER_ALT not in board.frames[handoff:ready], \
+            "Plain native output must start on primary screen for terminal scrollback"
+        forbid(board.frames[handoff + len(LEAVE_ALT):], "attach")
         assert not cooked(board.master), "Raw mode must stay enabled across the handoff"
 
         # 2. Raw byte forwarding during the handoff.
@@ -140,11 +146,19 @@ with tempfile.TemporaryDirectory(prefix="kiro-handoff-test-") as scratch:
         board.press(b"hi")
         board.wait(b"BYTES:6869")
 
+        # Scroll/navigation input belongs to native Kiro, never a wrapper parser.
+        for payload in [b"\x1b[5~", b"\x1b[<64;1;1M", b"\x1b[<65;1;1M"]:
+            board.frames = b""
+            board.press(payload)
+            board.wait(b"BYTES:" + payload.hex().encode())
+
         # 3. The child takes private modes, then Ctrl+B d returns to the
         #    board on the same screen: only child-mode resets are allowed.
         board.frames = b""
         board.press(b"screen")
         board.wait(b"NATIVE")
+        board.press(b"\x1b[<64;1;1M")
+        board.wait(b"BYTES:1b5b3c36343b313b314d")
         board.frames = b""
         board.press(b"\x02d")
         board.wait(b"Kiro sessions")
@@ -174,14 +188,14 @@ with tempfile.TemporaryDirectory(prefix="kiro-handoff-test-") as scratch:
         # 5. Quitting the board restores the shell exactly once.
         board.frames = b""
         board.finish()
-        assert LEAVE_ALT in board.frames, "Board quit is the only alt-screen leave"
+        assert LEAVE_ALT in board.frames, "Board quit restores the primary screen"
         assert cooked(board.master), "Board quit must restore cooked mode"
 
         rows = {row["id"]: row for row in json.loads(call("status", "--json"))}
         assert rows[first["id"]]["state"] == "live" and rows[second["id"]]["state"] == "exited", rows
         assert rows[first["id"]]["pid"] == first["pid"], "Handoffs must not restart the child"
         os.kill(first["pid"], 0)
-        print("PASS: attach/detach stay on one alternate screen in raw mode, "
+        print("PASS: native primary-screen scrollback handoff stays raw; wheel/page keys pass through, "
               "child modes reset, native exit restores alt, board quit restores shell")
     finally:
         board.close()

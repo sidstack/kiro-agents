@@ -121,6 +121,9 @@ def main():
         agents = scratch / "agents.json"
         agents.write_text(json.dumps({"agents": [{"name": "reviewer"}, {"name": "planner"}]}))
         env["KIRO_AGENTS_FAKE_AGENT_FIXTURE"] = str(agents)
+        env["KIRO_HOME"] = env["KIRO_AGENTS_HOME"] + "/kiro"
+        env["KIRO_SESSIONS_DIR"] = env["KIRO_HOME"] + "/sessions/cli"
+        env["KIRO_AGENT_CONFIG_DIR"] = env["KIRO_HOME"] + "/agents"
 
         def call(*args):
             return subprocess.check_output([str(BINARY), *args], env=env, timeout=10)

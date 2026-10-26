@@ -104,7 +104,7 @@ def main():
         notes = root / 'notes.md'
         notes.write_text(f"Branch beta for `{run['head_branch']}` at `{run['head_sha']}`.\n\n"
                          f"[Passed integration and security checks]({run['html_url']}). "
-                         "The extracted optimized binary passed all six fake-Kiro PTY scenarios. "
+                         "The extracted optimized binary passed all fake-Kiro PTY scenarios. "
                          "This prerelease does not replace the latest stable release.\n\n"
                          "Verify SHA256SUMS before installation. Kiro CLI is required separately.\n")
         if existing.returncode != 0:

@@ -125,3 +125,34 @@ of a real Kiro contract. Unknown output offers the Kiro default or an explicit
 manually entered name. No real Kiro session, account state, or model call was
 used for these checks. Guacamole visual acceptance of the new transitions
 remains a manual follow-up; prior native repaint limits still apply.
+
+## Dashboard usability and native naming (2026-10-26)
+
+- Installed Kiro CLI 2.32.0 `agent list --help`, run under a temporary HOME and Kiro
+  roots, advertises verbose/help options and cwd-local discovery, without a JSON
+  format option. Listing with `--format json-pretty` remains login-gated. JSON-only
+  capture cannot be treated as complete discovery; scoped read-only profile fallback
+  is required. Authentication/model calls were not attempted.
+- Read-only shape inspection of existing native session metadata confirmed `.json`
+  fields `session_id`, `cwd`, `created_at`, `updated_at`, `title`,
+  `session_created_reason`, `session_state`; `.lock` fields `pid`, `started_at`.
+  Metadata identity matched the filename stem. Native JSONL record discriminators
+  include `Prompt`, `AssistantMessage`, `ToolResults`; prompt text parts use
+  `data.content[].kind = text` and a string `data`. No prompt, title, auth state or
+  transcript content was printed or committed. These observations support bounded
+  read-only naming, not history/resume or a universal storage contract.
+- The prior single-alternate-screen handoff prevents ordinary primary-screen terminal
+  scrollback for native applications that otherwise use the primary screen. After
+  ACK, releasing the board's alternate screen while retaining raw mode gives Kiro
+  the same screen choice as direct invocation. No shell resumes between views.
+  Terminal wheel/PageUp input remains byte passthrough; Kiro's own alternate-screen
+  history behavior and browser-specific scrolling still need visual acceptance.
+- Backspace may arrive as Ctrl+Backspace/Ctrl+H in legacy terminals. The control-key
+  guard previously discarded those events before editing handlers could process them.
+
+- Profile fallback review also checked [Kiro's custom-agent documentation](https://kiro.dev/docs/cli/custom-agents/):
+  it documents nested path-based names and workspace precedence. The upgrade reference
+  documents the `KIRO_AGENT_CONFIG_DIR` override and legacy paths. Discovery therefore
+  bounds nested traversal and supports read-only profile-file symlinks rather than
+  treating a flat regular-file scan as complete. Current V2 CLI acceptance of every
+  newer profile format still belongs to Kiro's resolver, not this wrapper.

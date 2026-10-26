@@ -43,6 +43,7 @@ struct Session {
 struct Host {
     dir: PathBuf,
     sessions: BTreeMap<String, Session>,
+    features: Vec<Box<dyn crate::features::SessionFeature>>,
 }
 
 impl Host {
@@ -81,7 +82,7 @@ impl Host {
             self.sessions.values().filter(|s| s.child.is_some()).count() < MAX_SESSIONS,
             "MVP limit: {MAX_SESSIONS} live sessions"
         );
-        // Fresh launches only. No Kiro session UUID is invented, read, or resumed.
+        // Fresh launches only. Wrapper IDs never select or resume Kiro history.
         let id = uuid::Uuid::new_v4().simple().to_string()[..12].to_owned();
         let pair = native_pty_system().openpty(size(80, 24))?;
         let reader = pair.master.try_clone_reader()?;
@@ -100,6 +101,9 @@ impl Host {
             }
         });
         let info = SessionInfo {
+            name: None,
+            title: None,
+            title_source: None,
             id: id.clone(),
             cwd,
             agent,
@@ -133,6 +137,50 @@ impl Host {
             return Err(error);
         }
         Ok((info, reader))
+    }
+
+    fn rename(&mut self, id: &str, name: Option<String>) -> Result<()> {
+        let name = name
+            .map(|name| crate::features::validate_name(&name))
+            .transpose()?;
+        let session = self.sessions.get_mut(id).context("Unknown session ID")?;
+        let previous = std::mem::replace(&mut session.info.name, name);
+        if let Err(error) = self.save() {
+            if let Some(session) = self.sessions.get_mut(id) {
+                session.info.name = previous;
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn refresh_titles(&mut self) -> Result<()> {
+        let mut changed = false;
+        for session in self
+            .sessions
+            .values_mut()
+            .filter(|session| session.child.is_some())
+        {
+            if session.info.name.is_some() {
+                continue;
+            }
+            for feature in &self.features {
+                if let Some(title) = feature.title(&session.info) {
+                    if session.info.title.as_deref() != Some(&title.text)
+                        || session.info.title_source.as_deref() != Some(title.source)
+                    {
+                        session.info.title = Some(title.text);
+                        session.info.title_source = Some(title.source.to_owned());
+                        changed = true;
+                    }
+                    break;
+                }
+            }
+        }
+        if changed {
+            self.save()?;
+        }
+        Ok(())
     }
 
     fn stop(&mut self, id: &str) -> Result<()> {
@@ -251,6 +299,7 @@ pub fn run(dir: PathBuf) -> Result<()> {
     let mut host = Host {
         dir,
         sessions: BTreeMap::new(),
+        features: crate::session_features()?,
     };
     for mut info in rows {
         if info.state == "live" {
@@ -305,7 +354,8 @@ fn handle(mut stream: UnixStream, shared: Shared) -> Result<()> {
     }
     let result: Result<Reply> = (|| match request.action {
         Action::Status => {
-            let host = shared.lock().map_err(|_| anyhow!("Host lock poisoned"))?;
+            let mut host = shared.lock().map_err(|_| anyhow!("Host lock poisoned"))?;
+            host.refresh_titles()?;
             Ok(Reply::Sessions(
                 host.sessions.values().map(|s| s.info.clone()).collect(),
             ))
@@ -316,7 +366,14 @@ fn handle(mut stream: UnixStream, shared: Shared) -> Result<()> {
                 .map_err(|_| anyhow!("Host lock poisoned"))?
                 .new_session(cwd, agent)?;
             supervise(shared.clone(), info.id.clone(), pty_reader);
-            Ok(Reply::Created(info))
+            Ok(Reply::Created(Box::new(info)))
+        }
+        Action::Rename { id, name } => {
+            shared
+                .lock()
+                .map_err(|_| anyhow!("Host lock poisoned"))?
+                .rename(&id, name)?;
+            Ok(Reply::Ok)
         }
         Action::Stop { id } => {
             shared

@@ -6,8 +6,8 @@ expression: "render(&board, &Mode::Browse, 100, 20)"
 │ ALL   0/8 live  ·  1 historical  ·  Search:                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Projects and sessions─────────────────────────────────────────────────────────────────────────────┐
-│› project  reviewer  ·  v2  ·  exited                                                             │
-│  session-one  ·  /work/project                                                                   │
+│› project · reviewer   · exited                                                                   │
+│  reviewer · v2 · session-one · /work/project                                                     │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
@@ -20,4 +20,4 @@ Cannot attach: session is exited (exit 0). Use Kiro history manually or Ctrl+N f
 
 
 ↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh
-Ctrl+N create · Ctrl+K stop · q/Ctrl+Q quit (sessions stay alive)
+Ctrl+N create · F2 rename · Ctrl+K stop · q/Ctrl+Q quit
