@@ -165,3 +165,23 @@ subsequently completed and latest-stable installation was verified as v0.4.0 in 
 temporary prefix. The installer now retries missing assets for a bounded three minutes
 per asset, while preserving any existing binary on failure. Fixtures cover delayed
 assets and exhaustion; this does not weaken checksum or archive/version verification.
+
+## Naming upgrade and actual V2 store gap (2026-10-26)
+
+Read-only diagnostics found an installed 0.4.0 frontend connected to a still-running
+0.2.0 host. Newly created sessions were therefore supervised by the old host, which
+never supplied naming fields. The prior naming tests covered fresh new hosts, not
+this upgrade path. Production processes were not stopped or restarted.
+
+Managed V2 processes were kiro-cli launchers with kiro-cli-chat children. Their native
+store descriptors were SQLite and there were no matching file-based PID locks, including
+when checking the child's configured native root. No environment values, conversation
+text, titles or credentials were printed. A file-based title reader cannot establish
+SQLite conversation ownership and must not be presented as automatic naming for this
+layout. Verified SQLite store support remains in the explicit next-batch backlog.
+
+Shared persistent custom names now work with old hosts, alongside unique fallback labels
+and a visible frontend version. The regression test uses a pre-naming protocol fixture
+in CI and was also run against an isolated copy of the actual v0.2.0 executable with
+fake Kiro and temporary HOME/Kiro/XDG/state roots. Manual rename/clear did not alter
+legacy registry metadata or child PIDs, and no unsupported Rename RPC was sent.

@@ -100,7 +100,9 @@ Ctrl+U clears the query and Ctrl+R retries discovery. Esc from the agent list go
 back to the directory picker. Ctrl+K asks before stopping the selected live
 session. F2 names a session; an empty name restores its automatic title. The board
 prefers a manual name, then an exactly matched native Kiro title, a short first-prompt
-title, and directory/agent as the fallback. See [session names](docs/SESSION-NAMES.md).
+title, and directory/agent plus a unique ID as the fallback. F2 names work even with an
+older running host. Automatic SQLite TUI titles are not supported until a verified
+store association exists; use F2 for those sessions. See [session names](docs/SESSION-NAMES.md).
 r refreshes; q or Ctrl+Q leaves sessions alive.
 Exited, stopped, and failed rows explain why they cannot be attached.
 

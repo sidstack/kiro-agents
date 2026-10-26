@@ -170,3 +170,8 @@ not stop managed Kiro sessions. See docs/WORKSPACES.md and docs/journal/MULTIPLE
 Next-batch plans live in docs/BACKLOG.md: native historical-session resume and local
 fuzzy/full-text session quick-open, with separately verified V2/V3 store adapters.
 These are backlog items only; do not include them in the current multiplexer batch.
+Naming upgrade compatibility: custom labels are shared persistent metadata in private names.json,
+not an RPC requirement or a reason to restart live hosts. Status enrichment must support
+pre-naming hosts. Keep the actual v0.2.0 compatibility regression (synthetic old peer in
+CI), unique unnamed-session labels, and version-independent rendering snapshots. Do not
+claim automatic SQLite TUI titles until ownership mapping is verified; do not guess by cwd.

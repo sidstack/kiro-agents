@@ -2,11 +2,11 @@
 source: src/board/view.rs
 expression: "render(&board, &Mode::Browse, 100, 20)"
 ---
-┌Kiro sessions · MVP v3────────────────────────────────────────────────────────────────────────────┐
+┌Kiro sessions · v<version>────────────────────────────────────────────────────────────────────────────┐
 │ LIVE   1/8 live  ·  0 historical  ·  Search:                                                     │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Projects and sessions─────────────────────────────────────────────────────────────────────────────┐
-│› project · reviewer   · live                                                                     │
+│› project · reviewer · #session-one   · live                                                      │
 │  reviewer · v2 · session-one · /work/project                                                     │
 │                                                                                                  │
 │                                                                                                  │
