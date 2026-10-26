@@ -50,7 +50,7 @@ jobs:
           import json, os, subprocess
           for pr in json.loads(os.environ['RELEASE_PRS']):
               branch = pr['headBranchName']
-              for workflow in ['checks.yml', 'security.yml']:
+              for workflow in ['checks.yml', 'security.yml', 'beta.yml']:
                   subprocess.run(['gh', 'workflow', 'run', workflow, '--ref', branch], check=True)
           PYPRS
   binary:
