@@ -1,0 +1,57 @@
+name: Branch beta
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: beta-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  integration:
+    name: beta-integration
+    # PRs test the merge result; branch pushes provide exact-commit previews.
+    if: github.ref_name != 'main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Run Rust, snapshots, PTY and packaging integration checks
+        run: make check
+      - name: Audit dependencies before building beta
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          make audit
+      - name: Package versioned beta from the exact checked commit
+        env:
+          SEQUENCE: ${{ github.run_number }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python3 scripts/package_release.py --beta --sequence "$SEQUENCE" --attempt "$ATTEMPT" --source-sha "$(git rev-parse HEAD)"
+      - name: Test the extracted optimized beta binary through all PTY scenarios
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          metadata = json.loads(Path('dist/beta.json').read_text())
+          subprocess.run(['python3', 'tests/installed_binary.py', str(Path('dist') / metadata['archive']), '--expected-version', metadata['version']], check=True)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: beta-linux
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/beta.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true

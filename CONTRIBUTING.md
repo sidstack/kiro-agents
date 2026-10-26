@@ -29,3 +29,9 @@ changes in an issue first.
 
 This is an independent project, not affiliated with or endorsed by Amazon,
 Kiro, OpenAI or Pi. Respect their trademarks and do not copy their branding.
+
+Branch pushes also run the Branch beta workflow: the full integration suite and
+RustSec audit, followed by all six PTY scripts against the extracted optimized beta
+binary. Same-repository builds publish GitHub prereleases for manual testing before
+merge. Fork PR builds provide read-only artifacts. See `docs/RELEASING.md` for beta
+versioning, installation and the separate stable release process.

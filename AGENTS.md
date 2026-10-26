@@ -126,6 +126,13 @@ checksum, extract, install to `~/.local/bin`, then run `kiro-agents doctor`. Sou
 uses `cargo install --path . --locked`. For workflow retry and detailed release policy, read
 `docs/RELEASING.md`; use its existing-tag binary workflow instead of inventing a new release.
 
+Branch beta workflows run full checks and audit before packaging, then rerun all six
+fake-Kiro PTY scripts against the extracted optimized binary. Betas use the next Cargo
+patch plus `-beta.RUN.ATTEMPT`, recording the exact source SHA without committing version
+changes. A separate publisher executes only trusted default-branch code and validates
+artifacts; never execute branch code with its write token. Fork builds provide artifacts
+only. Betas are prereleases and never replace latest stable. See `docs/RELEASING.md`.
+
 ## Security and OSS maintenance
 
 `make audit` checks the complete lockfile with RustSec; CI runs it on changes, releases
