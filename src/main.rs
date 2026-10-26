@@ -22,6 +22,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Open optional tmux workspaces (requires tmux; sessions remain host-owned)
+    Workspace {
+        #[command(subcommand)]
+        command: Option<WorkspaceCommand>,
+    },
     /// Open the session board (plain list when piped)
     Board,
     /// Start a fresh V2 session and attach (Ctrl+B d detaches)
@@ -68,6 +73,71 @@ enum Command {
     Host,
 }
 
+#[derive(Subcommand)]
+enum WorkspaceCommand {
+    /// Open/create a named workspace; each Kiro pane starts at the session board
+    Open {
+        #[arg(default_value = "main")]
+        name: String,
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+        #[arg(long)]
+        detach: bool,
+    },
+    /// Split the current owned workspace pane; --terminal opens a shell
+    Split {
+        #[arg(long, conflicts_with = "vertical")]
+        horizontal: bool,
+        #[arg(long)]
+        vertical: bool,
+        #[arg(long)]
+        terminal: bool,
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+    },
+    /// Create a window containing a session picker or a terminal
+    Window {
+        #[arg(long)]
+        terminal: bool,
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+    },
+    /// List this application's tmux workspaces
+    List,
+    /// Close a workspace and its panes; managed Kiro sessions keep running
+    Close { name: String },
+}
+
+fn workspace(command: Option<WorkspaceCommand>) -> Result<()> {
+    let feature = kiro_agents::workspace_feature()?;
+    match command.unwrap_or(WorkspaceCommand::Open {
+        name: "main".into(),
+        dir: PathBuf::from("."),
+        detach: false,
+    }) {
+        WorkspaceCommand::Open { name, dir, detach } => feature.open(&name, &dir, detach),
+        WorkspaceCommand::Split {
+            vertical,
+            terminal,
+            dir,
+            ..
+        } => {
+            let direction = if vertical {
+                kiro_agents::features::SplitDirection::Vertical
+            } else {
+                kiro_agents::features::SplitDirection::Horizontal
+            };
+            feature.split(direction, terminal, &dir)
+        }
+        WorkspaceCommand::Window { terminal, dir } => feature.window(terminal, &dir),
+        WorkspaceCommand::List => {
+            write!(io::stdout(), "{}", feature.list()?)?;
+            Ok(())
+        }
+        WorkspaceCommand::Close { name } => feature.close(&name),
+    }
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -77,6 +147,7 @@ fn main() -> Result<()> {
     let dir = state_dir()?;
     match cli.command.unwrap_or(Command::Board) {
         Command::Host => host::run(dir),
+        Command::Workspace { command } => workspace(command),
         Command::Doctor => kiro::doctor(),
         Command::Agents { dir } => kiro::agents(&dir.canonicalize()?),
         Command::New {

@@ -2,7 +2,8 @@
 
 Workspace mode is optional and requires external tmux 3.2+. The normal session board
 is unchanged; Kiro processes remain owned by the existing session host. Workspaces
-use a dedicated tmux socket/configuration under KIRO_AGENTS_HOME/workspaces and never
+use a dedicated tmux socket under KIRO_AGENTS_HOME/workspaces, start with an empty
+configuration, and install their own bindings in that private server. They never
 modify your default tmux server or ~/.tmux.conf. Set KIRO_AGENTS_WORKSPACES=off to disable
 workspace commands; setting it on (default) makes explicit workspace commands available.
 
@@ -13,6 +14,13 @@ kiro-agents workspace open project --detach   # create without attaching a clien
 kiro-agents workspace list
 kiro-agents workspace close project           # explicit: closes its shell panes too
 ```
+
+Names start with a letter or digit and contain up to 64 ASCII letters, digits,
+hyphens or underscores. Dots are rejected because tmux silently rewrites them.
+Install tmux using your system package manager if it is missing; the binary
+installer does not install system dependencies. `KIRO_AGENTS_TMUX_BIN` can select
+an explicit tmux executable. Workspace sockets need a short absolute state path
+(at most 100 bytes including `/workspaces/tmux.sock`); errors explain the limit.
 
 Each new Kiro pane opens a board to choose or create its own session. A managed Kiro
 session can have one attached frontend; an existing attachment is never stolen.
@@ -52,5 +60,13 @@ alive. Closing a shell pane terminates that pane's shell as tmux normally does. 
 a workspace never calls the Kiro host shutdown command. To stop a managed Kiro session,
 use the existing board stop action or kiro-agents stop explicitly.
 
-The feature is still under implementation on its branch. Unit/behavioral tests must
-use private temporary sockets, fake Kiro and temporary HOME/XDG/Kiro paths; no paid calls.
+This feature is available on its branch for beta testing. Existing managed sessions
+remain in the same host and registry; select them in any pane without migrating state
+or restarting the host. Detach an existing frontend before attaching that session in
+another pane. Workspaces do not resume stopped historical sessions.
+
+Unit/behavioral tests use private temporary sockets, fake Kiro and temporary
+HOME/XDG/Kiro paths. A real tmux client in a PTY exercises split/window/shell bindings,
+focus, zoom, close confirmation, doubled-prefix inner detach and workspace detach.
+The same suite runs against the extracted optimized beta binary in branch CI.
+Authenticated Kiro and browser/Guacamole visual acceptance remain manual checks.

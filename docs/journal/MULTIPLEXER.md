@@ -8,17 +8,33 @@ ordinary session board and binary installation remain usable without tmux.
 
 - [x] Merge the verified installer and dashboard branch into main.
 - [x] Create the feature branch from updated main; define the workspace trait/CLI.
-- [ ] Implement private-server workspace creation, listing, switching and explicit close.
-- [ ] Implement left/right and top/bottom session-picker panes, shell panes and windows.
-- [ ] Preserve standard focus, resize, zoom, close, copy-mode and detach controls.
-- [ ] Verify fake Kiro sessions survive pane closure and workspace detachment.
-- [ ] Verify feature disable, foreign-server isolation and safe command quoting.
-- [ ] Test packaged binaries in branch CI and publish a beta for manual acceptance.
+- [x] Implement private-server workspace creation, listing, switching and explicit close.
+- [x] Implement left/right and top/bottom session-picker panes, shell panes and windows.
+- [x] Preserve standard focus, resize, zoom, close, copy-mode and detach controls.
+- [x] Verify fake Kiro sessions survive pane closure and workspace detachment.
+- [x] Verify feature disable, foreign-server isolation and safe command quoting.
+- [x] Add workspace integration to branch CI and extracted optimized beta checks.
+- [ ] Complete manual authenticated Kiro/Guacamole acceptance using the branch beta.
 
 Pi swarm work split (Strata Qwen 3.8): tmux-backend owns src/workspace/mod.rs;
 tmux-integration owns tests/workspace.py. Coordinator owns CLI/feature assembly,
 CI dependencies, documentation and final integration. Worker results trigger review;
 do not repeatedly poll idle workers or duplicate their implementation.
+
+Both Qwen workers returned design/source drafts without authoring or running their
+assigned files: their Pi tool guards rejected tmux socket commands even inside file
+content. Guards were left intact. The coordinator reviewed and applied the backend,
+corrected argv/shell quoting and runtime issues, authored the integration harness,
+and ran the private-server checks with its authorized tools. Worker drafts alone
+were not treated as validation. The swarm is closed and temporary worker credentials
+removed.
+
+Coordinator validation: `make check` passed (80 Rust tests, ten fake-Kiro PTY
+scenarios and the installer/packaging/publisher tests); strict `make audit` and
+actionlint passed. Workspace coverage includes two independently attached sessions,
+actual prefix controls, explicit directory selection with shell/format metacharacters,
+owned-client switching, missing tmux/disabled/non-TTY failures, foreign-server refusal,
+and unchanged managed PIDs after closing panes, detaching and closing workspaces.
 
 ## Boundaries
 

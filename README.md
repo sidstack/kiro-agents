@@ -126,10 +126,15 @@ profiles and never adds tool-trust flags.
 
 ## Optional workspaces (feature branch)
 
-Tmux-backed panes/windows are being developed on `feat/tmux-workspaces`; see
-[workspace controls and boundaries](docs/WORKSPACES.md). They require tmux 3.2+
-and leave the standard dashboard available without that dependency. This branch
-uses native tmux for terminal rendering; no terminal emulator is added to the wrapper.
+This branch adds `kiro-agents workspace` for tmux panes and windows. Each pane can
+select a managed Kiro session or run a plain shell. Use the usual Ctrl+B prefix:
+`%` / `"` split, arrows focus, `z` zoom, `x` close, `c` new window, `[` scrollback,
+and `d` detach the workspace. Ctrl+B Ctrl+B d returns one Kiro pane to its dashboard.
+Managed sessions survive pane/workspace closure and binary upgrades.
+
+Requires external tmux 3.2+; the ordinary dashboard works without it. This uses a
+private tmux server with its own bindings, preserving your default tmux server and
+configuration. See [workspace commands and controls](docs/WORKSPACES.md).
 
 ## What is validated
 
@@ -178,6 +183,8 @@ make check                     # fmt, clippy, tests, fake terminal smoke
 make audit                     # requires cargo-audit; strict RustSec audit
 make probe                     # opt-in real-CLI test; requires a checkout
 ```
+
+The workspace integration test also requires tmux 3.2+ during development/CI.
 
 Probes isolate `HOME`, `KIRO_HOME`, Kiro overrides, and XDG roots in a temporary
 directory. Only sanitized capability summaries go to ignored `probes/out/`.

@@ -15,6 +15,13 @@ the separately installed Kiro CLI, operating-system packages, or unknown defects
 Machine-readable reports were kept outside the repository; no scan report embeds
 private source content or possible secret values in the published project.
 
+Workspace-branch follow-up (2026-10-26): cargo-audit 0.22.2 with RustSec database
+commit `3279c99911354c400e1d41e47c7d60e39258b147` checked the current complete lockfile
+(156 dependencies); strict `make audit` passed without vulnerabilities or warnings.
+No new Rust dependency was added for workspaces. This audit does not scan the
+separately installed tmux binary or OS packages; the earlier Trivy result above
+is separate evidence, not a new scan of this branch.
+
 Reproduce with:
 
 ```sh

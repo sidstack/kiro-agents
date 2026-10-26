@@ -25,6 +25,12 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
+      - name: Install tmux for isolated workspace integration tests
+        run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes tmux
+          fi
       - name: Run Rust, snapshots, PTY and packaging integration checks
         run: make check
       - name: Audit dependencies before building beta

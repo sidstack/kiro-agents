@@ -166,6 +166,9 @@ windows, scrollback and shells. Assemble the backend through WorkspaceFeature; k
 session-host ownership independent. Never use the default/user tmux server or modify
 ~/.tmux.conf; use only the private wrapper-state socket. Closing panes/workspaces must
 not stop managed Kiro sessions. See docs/WORKSPACES.md and docs/journal/MULTIPLEXER.md.
+Workspace tests require tmux 3.2+ and use only temporary private sockets. Exercise
+prefix keys through a real attached PTY client: tmux send-keys bypasses the client's
+prefix parser. Keep the test in make check and the extracted-beta integration suite.
 
 Next-batch plans live in docs/BACKLOG.md: native historical-session resume and local
 fuzzy/full-text session quick-open, with separately verified V2/V3 store adapters.

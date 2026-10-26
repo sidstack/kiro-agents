@@ -19,6 +19,12 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
+      - name: Install tmux for isolated workspace integration tests
+        run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes tmux
+          fi
       - run: make check
       - run: cargo install cargo-audit --version 0.22.2 --locked
       - run: cargo audit --deny warnings

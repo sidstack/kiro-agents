@@ -5,6 +5,7 @@ pub mod features;
 pub mod host;
 pub mod kiro;
 pub mod protocol;
+mod workspace;
 
 use std::{env, path::PathBuf};
 
@@ -42,6 +43,24 @@ fn naming_features(mode: Option<&str>) -> anyhow::Result<Vec<Box<dyn features::S
         directory,
         first_message,
     ))])
+}
+
+/// Workspace mode is opt-in through the CLI and may be disabled globally.
+pub fn workspace_feature() -> anyhow::Result<Box<dyn features::WorkspaceFeature>> {
+    match std::env::var("KIRO_AGENTS_WORKSPACES")
+        .unwrap_or_else(|_| "on".into())
+        .as_str()
+    {
+        "on" | "true" | "1" => (),
+        "off" | "false" | "0" => {
+            anyhow::bail!("Workspace feature is disabled by KIRO_AGENTS_WORKSPACES")
+        }
+        _ => anyhow::bail!("KIRO_AGENTS_WORKSPACES must be on or off"),
+    }
+    Ok(Box::new(workspace::TmuxWorkspace::new(
+        state_dir()?,
+        std::env::current_exe()?,
+    )?))
 }
 
 #[cfg(test)]

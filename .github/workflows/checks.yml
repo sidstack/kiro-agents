@@ -33,6 +33,12 @@ jobs:
           PYTITLE
       - name: Lint GitHub workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Install tmux for isolated workspace integration tests
+        run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes tmux
+          fi
       - run: make check
       - name: Inspect source package
         run: cargo package --locked --list

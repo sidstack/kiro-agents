@@ -48,6 +48,26 @@ pub fn validate_name(name: &str) -> anyhow::Result<String> {
     Ok(name.to_owned())
 }
 
+/// Optional external terminal workspace; the session host never owns tmux or shell panes.
+#[derive(Debug, Clone, Copy)]
+pub enum SplitDirection {
+    Horizontal,
+    Vertical,
+}
+
+pub trait WorkspaceFeature: Send + Sync {
+    fn open(&self, name: &str, cwd: &std::path::Path, detached: bool) -> anyhow::Result<()>;
+    fn split(
+        &self,
+        direction: SplitDirection,
+        terminal: bool,
+        cwd: &std::path::Path,
+    ) -> anyhow::Result<()>;
+    fn window(&self, terminal: bool, cwd: &std::path::Path) -> anyhow::Result<()>;
+    fn list(&self) -> anyhow::Result<String>;
+    fn close(&self, name: &str) -> anyhow::Result<()>;
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

@@ -185,3 +185,19 @@ and a visible frontend version. The regression test uses a pre-naming protocol f
 in CI and was also run against an isolated copy of the actual v0.2.0 executable with
 fake Kiro and temporary HOME/Kiro/XDG/state roots. Manual rename/clear did not alter
 legacy registry metadata or child PIDs, and no unsupported Rename RPC was sent.
+
+## Private tmux workspace probes (2026-10-26)
+
+Isolated tmux 3.4 probes found that dots in session names are silently replaced
+by underscores. Workspace names therefore reject dots rather than losing identity
+between create/list/reopen/close. Tmux expands formats in explicit `-c` directories;
+literal hashes must be escaped there. Stored bindings use tmux's current-directory
+format. Shell commands and tmux argv have different quoting layers; prequoting argv
+values breaks command dispatch and directory selection.
+
+The regression uses private temporary sockets, fake Kiro, a real attached tmux client,
+and executable/state/project paths containing spaces, apostrophes, dollar signs and
+hashes. It checks the actual pane process cwd through `/proc`, since formatted tmux
+path metadata may escape characters. `send-keys` bypasses client prefix handling;
+the PTY client is necessary to verify Ctrl+B Ctrl+B d versus workspace Ctrl+B d.
+No production tmux/Kiro server, native store, authentication or model call is involved.
