@@ -129,7 +129,9 @@ uses `cargo install --path . --locked`. For workflow retry and detailed release 
 ## Security and OSS maintenance
 
 `make audit` checks the complete lockfile with RustSec; CI runs it on changes, releases
-and weekly. Dependabot proposes Cargo and Actions updates. Preserve secret scanning,
+and weekly. Dependabot groups Cargo and Actions version updates into one weekly PR;
+review breaking changes and keep merging explicit. See `CONTRIBUTING.md` for dependency
+squash titles and the separate release PR. Preserve secret scanning,
 push protection, private vulnerability reporting and dependency alerts on GitHub.
 Do not suppress advisories or weaken release checks to ship a binary.
 
