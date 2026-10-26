@@ -11,6 +11,8 @@ check:
 	python3 tests/board_ack.py
 	python3 tests/board_picker.py
 	python3 tests/release_package.py
+	python3 tests/installed_binary_test.py
+	python3 tests/beta_publish.py
 
 probe:
 	cargo test --features probe -- --ignored

@@ -9,12 +9,13 @@ import select
 import signal
 import struct
 import subprocess
+import sys
 import tempfile
 import termios
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = ROOT / "target/debug/kiro-agents"
+BINARY = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / "target/debug/kiro-agents"
 
 
 def expect(master, marker):

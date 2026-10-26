@@ -20,6 +20,49 @@ release exists yet; the first release PR updates it to 0.3.0. Subsequent
 versions are computed without override footers.
 The local 0.1.0/0.2.0 MVP iterations were never published GitHub releases.
 
+## Branch beta binaries
+
+Every push to a branch other than `main` runs **Branch beta**. It runs `make check`
+(Rust tests, snapshots, fake-Kiro PTY integration and packaging tests), a strict
+RustSec audit, then packages an optimized Linux x86_64 binary. The extracted binary
+must pass all six PTY integration scripts before the `beta-linux` artifact is uploaded.
+Fork pull requests get the same build/tests as a read-only artifact, without publication.
+No real Kiro authentication or paid model calls are used.
+
+Beta versions derive from the branch's Cargo version: `0.3.0` becomes
+`0.3.1-beta.RUN.ATTEMPT`. Run numbers identify builds across branches; the attempt
+increments on rerun. This predicts a patch base for testing, not the next stable
+version: a later feature release may become `0.4.0`. The exact source SHA is recorded
+in `beta.json` and the prerelease tag. Version stamping occurs only in the build
+checkout; no version changes, commits or tags are pushed back to the branch.
+
+A separate **Publish beta** workflow runs trusted default-branch code after a
+successful same-repository branch build. It verifies the workflow identity, source
+SHA, version, archive member allowlist and checksum, then creates a GitHub prerelease
+with the archive, SHA256SUMS and beta.json. It never executes the branch binary or
+checks out the branch with a write token. Dependency bot branches are supported.
+Fork artifacts are never published by this privileged workflow.
+
+Prereleases are marked `--prerelease --latest=false`, so the stable release remains
+latest. Download a beta from GitHub Releases, verify its SHA256SUMS and use the normal
+binary installation steps below. `kiro-agents --version` must show the beta suffix.
+To test without replacing an installation, run the extracted executable directly.
+
+To rebuild a branch manually after these workflows are merged into `main`:
+
+```sh
+gh workflow run beta.yml --ref YOUR_BRANCH
+```
+
+Rerun the original Branch beta workflow to retry a beta build/publication; a new
+attempt produces a new beta identity. Do not use the stable Release binary workflow
+for beta tags: their source Cargo version intentionally remains unchanged.
+
+Stable Release Please versions, manifests and publication remain separate. Review
+and merge the dependency/feature PR only after testing its beta; merge the generated
+stable release PR when ready to publish. Bootstrap requires the workflow infrastructure
+on `main` first, then update existing branches from `main` to build their betas.
+
 ## GitHub setup
 
 Use `main` as the repository's default branch and enable GitHub Actions. Under
@@ -101,5 +144,5 @@ In an isolated clone, a temporary test tag exercised the complete packager:
 optimized binary build, Cargo/tag/binary identity checks, archive construction,
 checksum verification, extraction, `--version`, and the extracted binary's
 PTY handoff regression. All passed. No tag or release was published by this
-local check. Hosted automation still requires a GitHub remote and the setup
-permissions above.
+local check. The public GitHub repository now has hosted automation enabled; v0.3.0 was
+published and its downloaded archive passed checksum, version and PTY handoff checks.
