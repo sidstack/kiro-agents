@@ -1,5 +1,8 @@
 # Supporting both Kiro CLI V2 and V3
 
+This is the target design. The current [MVP](MVP.md) supports fresh V2 launches
+and live-process reattach only; history, Kiro UUID tracking, and resume are deferred.
+
 Kiro CLI ships two agent harnesses side by side. They are **not** interchangeable, and their
 saved session formats are **not backward compatible**: "V2 cannot open a V3 session because
 the stored session formats differ; that is a cross-version migration boundary." Supporting

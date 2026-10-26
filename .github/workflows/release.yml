@@ -1,0 +1,63 @@
+name: Semantic release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: semantic-release
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - run: make check
+      - run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: cargo audit --deny warnings
+  version:
+    needs: check
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: write
+      issues: write
+      pull-requests: write
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Start checks on generated release PRs
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        run: |
+          python3 - <<'PYPRS'
+          import json, os, subprocess
+          for pr in json.loads(os.environ['RELEASE_PRS']):
+              branch = pr['headBranchName']
+              for workflow in ['checks.yml', 'security.yml']:
+                  subprocess.run(['gh', 'workflow', 'run', workflow, '--ref', branch], check=True)
+          PYPRS
+  binary:
+    needs: version
+    if: needs.version.outputs.released == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/binary.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}

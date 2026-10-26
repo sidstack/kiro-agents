@@ -1,0 +1,23 @@
+---
+source: src/board/view.rs
+expression: "render(&board, &Mode::Agent { directory: directory(), picker }, 100, 20)"
+---
+Kiro sessions
+  ┌New session: agent (optional) · 2/2───────────────────────────────────────────────────────────┐
+  │Directory: /work/project                                                                      │
+  │Filter:                                                                                       │
+  │                                                                                              │
+  │  Kiro default (no --agent)                                                                   │
+  │› reviewer                                                                                    │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │↑/↓ select · Enter create · Type to filter or enter a name                                    │
+  │Ctrl+R retry · Ctrl+U clear · Esc back to directory                                           │
+  │Choose a native agent or let Kiro apply its default.                                          │
+  │                                                                                              │
+  └──────────────────────────────────────────────────────────────────────────────────────────────┘

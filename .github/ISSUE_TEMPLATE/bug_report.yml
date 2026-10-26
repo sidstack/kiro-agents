@@ -1,0 +1,16 @@
+name: Bug report
+description: Report a reproducible problem using temporary, sanitized data.
+body:
+  - type: input
+    id: version
+    attributes:
+      label: kiro-agents and kiro-cli versions
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction and expected behavior
+      description: Include Linux distribution and terminal. Do not attach transcripts, tokens or auth state.
+    validations:
+      required: true

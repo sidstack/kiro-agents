@@ -1,0 +1,23 @@
+---
+source: src/board/view.rs
+expression: "render(&board, &Mode::Stop(\"session-one\".into()), 100, 20)"
+---
+Kiro sessions
+  ┌Stop session? y/n─────────────────────────────────────────────────────────────────────────────┐
+  │session-one                                                                                   │
+  │Stops only this owned session.                                                                │
+  │y confirms · n/Esc cancels                                                                    │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  └──────────────────────────────────────────────────────────────────────────────────────────────┘

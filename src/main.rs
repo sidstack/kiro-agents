@@ -1,0 +1,171 @@
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use kiro_agents::{
+    attach, board, host, kiro,
+    protocol::{Action, Reply, SessionInfo},
+    state_dir,
+};
+use std::{
+    io::{self, IsTerminal, Write},
+    path::{Path, PathBuf},
+};
+
+#[derive(Parser)]
+#[command(
+    version,
+    about = "Persistent native Kiro V2 sessions with a selection-first session board"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Open the session board (plain list when piped)
+    Board,
+    /// Start a fresh V2 session and attach (Ctrl+B d detaches)
+    New {
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+        #[arg(long)]
+        agent: Option<String>,
+        /// Explicit V2 selection (V2 is the only supported generation)
+        #[arg(long)]
+        v2: bool,
+        #[arg(long)]
+        no_attach: bool,
+    },
+    /// Reconnect to the same live process
+    Attach { id: String },
+    /// List metadata; no transcript is stored
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop one owned session
+    Stop { id: String },
+    /// Stop all owned sessions and the host
+    Shutdown,
+    /// Let Kiro list its native profiles for a directory
+    Agents {
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+    },
+    /// Verify Kiro's V2/TUI flags without making a model call
+    Doctor,
+    #[command(name = "__host", hide = true)]
+    Host,
+}
+
+fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(io::stderr)
+        .init();
+    let cli = Cli::parse();
+    let dir = state_dir()?;
+    match cli.command.unwrap_or(Command::Board) {
+        Command::Host => host::run(dir),
+        Command::Doctor => kiro::doctor(),
+        Command::Agents { dir } => kiro::agents(&dir.canonicalize()?),
+        Command::New {
+            dir: cwd,
+            agent,
+            no_attach,
+            ..
+        } => {
+            let cwd = cwd
+                .canonicalize()
+                .context("Project directory does not exist")?;
+            let cwd = cwd
+                .to_str()
+                .context("Project path must be UTF-8")?
+                .to_owned();
+            let reply = host::call(&dir, Action::New { cwd, agent }, true)?;
+            if let Reply::Created(session) = reply {
+                if !no_attach && io::stdin().is_terminal() && io::stdout().is_terminal() {
+                    attach::run(&dir, session.id.clone()).with_context(|| {
+                        format!(
+                            "Session {} was created; reconnect with kiro-agents attach {}",
+                            session.id, session.id
+                        )
+                    })?;
+                } else {
+                    writeln!(
+                        io::stdout(),
+                        "Created {} · v2 · {}",
+                        session.id,
+                        session.cwd
+                    )?;
+                    writeln!(io::stdout(), "Attach: kiro-agents attach {}", session.id)?;
+                }
+            } else {
+                anyhow::bail!("Unexpected host response");
+            }
+            Ok(())
+        }
+        Command::Attach { id } => attach::run(&dir, id),
+        Command::Status { json } => {
+            let rows = sessions(&dir)?;
+            if json {
+                writeln!(io::stdout(), "{}", serde_json::to_string_pretty(&rows)?)?;
+            } else {
+                display(&rows)?;
+            }
+            Ok(())
+        }
+        Command::Stop { id } => {
+            host::call(&dir, Action::Stop { id }, false)?;
+            Ok(())
+        }
+        Command::Shutdown => {
+            host::call(&dir, Action::Shutdown, false)?;
+            Ok(())
+        }
+        Command::Board if io::stdin().is_terminal() && io::stdout().is_terminal() => {
+            board::run(&dir)
+        }
+        Command::Board => display(&sessions(&dir)?),
+    }
+}
+
+fn sessions(dir: &Path) -> Result<Vec<SessionInfo>> {
+    // A fresh install needs no daemon just to show an empty list. Saved state
+    // starts a host if necessary so crash recovery also works from the board.
+    if !dir.join("host.sock").exists() && !dir.join("registry.json").exists() {
+        return Ok(Vec::new());
+    }
+    match host::call(dir, Action::Status, true)? {
+        Reply::Sessions(rows) => Ok(rows),
+        _ => anyhow::bail!("Unexpected host response"),
+    }
+}
+
+fn display(rows: &[SessionInfo]) -> Result<()> {
+    let mut output = io::stdout().lock();
+    writeln!(
+        output,
+        "Kiro V2 sessions · Ctrl+B d detaches · quitting leaves sessions alive"
+    )?;
+    if rows.is_empty() {
+        writeln!(
+            output,
+            "No sessions. Start one: kiro-agents new <directory>"
+        )?;
+    }
+    for session in rows {
+        writeln!(
+            output,
+            "{}  {:<8}  v2  {}  {}",
+            session.id,
+            session.state,
+            session.agent.as_deref().unwrap_or("(Kiro default)"),
+            session.cwd
+        )?;
+        if let Some(notice) = &session.notice {
+            writeln!(output, "  {notice}")?;
+        }
+    }
+    Ok(())
+}

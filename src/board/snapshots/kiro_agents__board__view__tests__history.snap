@@ -1,0 +1,23 @@
+---
+source: src/board/view.rs
+expression: "render(&board, &Mode::Browse, 100, 20)"
+---
+┌Kiro sessions · MVP v3────────────────────────────────────────────────────────────────────────────┐
+│ ALL   0/8 live  ·  1 historical  ·  Search:                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Projects and sessions─────────────────────────────────────────────────────────────────────────────┐
+│› project  reviewer  ·  v2  ·  exited                                                             │
+│  session-one  ·  /work/project                                                                   │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+Cannot attach: session is exited (exit 0). Use Kiro history manually or Ctrl+N for a fresh session.
+
+
+↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh
+Ctrl+N create · Ctrl+K stop · q/Ctrl+Q quit (sessions stay alive)

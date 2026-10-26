@@ -1,0 +1,23 @@
+---
+source: src/board/view.rs
+expression: "render(&board, &Mode::Browse, 100, 20)"
+---
+┌Kiro sessions · MVP v3────────────────────────────────────────────────────────────────────────────┐
+│ LIVE   1/8 live  ·  0 historical  ·  Search:                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Projects and sessions─────────────────────────────────────────────────────────────────────────────┐
+│› project  reviewer  ·  v2  ·  live                                                               │
+│  session-one  ·  /work/project                                                                   │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+/work/project
+Enter attaches · Ctrl+B d returns here
+
+↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh
+Ctrl+N create · Ctrl+K stop · q/Ctrl+Q quit (sessions stay alive)

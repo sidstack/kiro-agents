@@ -1,8 +1,11 @@
 # Build plan
 
-Prerequisite: Rust is not installed on this machine yet (`rustc`/`cargo` absent). Install
-`rustup` (stable) before P1. Kiro CLI is also not installed here; P0 needs a machine with a
-real `kiro-cli` install and a logged-in account.
+Current status (2026-10-16): stable Rust 1.99.1 and Kiro CLI 2.32.0 are installed.
+A minimal V2-only P1 slice is implemented; see [MVP scope/review](MVP.md) and
+[FINDINGS](FINDINGS.md). Login-dependent P0 probes remain blocked. The phases and
+stack below describe the broader roadmap, not the current executable. Dependency
+versions actually built are recorded in Cargo.lock. User-directed V2 validation
+now precedes V3, history import, and board polish.
 
 ## Stack
 

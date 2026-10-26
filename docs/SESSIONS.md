@@ -1,5 +1,8 @@
 # Sessions: the managed unit, and how it honors native Kiro
 
+This is the target design. The current [MVP](MVP.md) supports fresh V2 launches
+and live-process reattach only; history, Kiro UUID tracking, and resume are deferred.
+
 ## Definition
 
 A **session** (our term) is the tuple

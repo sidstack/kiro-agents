@@ -1,0 +1,42 @@
+[package]
+name = "kiro-agents"
+version = "0.3.0"
+edition = "2021"
+description = "Persistent native Kiro sessions with a selection-first terminal dashboard"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/sidstack/kiro-agents"
+homepage = "https://github.com/sidstack/kiro-agents"
+documentation = "https://github.com/sidstack/kiro-agents/blob/main/README.md"
+publish = false
+keywords = ["kiro", "terminal", "agents", "tui", "sessions"]
+categories = ["command-line-utilities", "development-tools"]
+include = [
+    "src/**", "tests/*.rs", "tests/*.py", "tests/fake-kiro/kiro-cli",
+    "Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "CHANGELOG.md",
+    "CONTRIBUTING.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "docs/**/*.md",
+    "Makefile", "scripts/package_release.py", "rust-toolchain.toml",
+]
+
+[features]
+probe = []
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.29"
+fs2 = "0.4"
+libc = "0.2"
+portable-pty = "0.9"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+signal-hook = "0.3"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+insta = "1"
+tempfile = "3"

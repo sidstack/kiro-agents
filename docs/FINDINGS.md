@@ -1,31 +1,127 @@
-# Findings (P0 output — currently empty)
+# Findings — 2026-10-16
 
-Fill this from `probes/out/` transcripts. Every entry states: command run, Kiro version,
-observed behavior, and which doc claim it confirms or contradicts.
+Target: Linux x86_64, Rust 1.99.1 / Cargo 1.99.1, Kiro CLI **2.32.0**.
+Reproduce with `make check` and `make probe`. Sanitized real-probe summaries are
+written to ignored `probes/out/v2-summary.json`; no terminal transcript, auth URL,
+credential, or child environment is logged. Findings override the reference docs.
 
-| # | Question | Source claim | Observed | Action |
-| --- | --- | --- | --- | --- |
-| 1 | Does V3 write `~/.kiro/sessions/cli/<id>.{json,jsonl,history,lock}`? | `[3p]` agenthud schema (V2-era) | | |
-| 2 | `.lock` shape and removal on clean exit / crash | `{"pid","started_at"}` | | |
-| 3 | `--resume-id` across generations | formats incompatible | | |
-| 4 | Two live processes, same session id | unknown | | |
-| 5 | Two live sessions, same directory | sessions are per-directory | | |
-| 6 | Detached PTY output before the child blocks | ~64 KiB PTY buffer | | |
-| 7 | Forced same-size resize triggers a full repaint | assumed | | |
-| 8 | `kiro-cli agent list --format json-pretty` shape and cwd scoping | documented command | | |
-| 9 | Legacy `.amazonq/cli-agents/` and `KIRO_AGENT_CONFIG_DIR` behavior | documented | | |
-| 10 | Hook triggers firing in a PTY-launched V3 session + exact stdin JSON | documented triggers | | |
-| 11 | Global `~/.kiro/hooks/` loaded for `kiro-cli chat --v3` | documented V3 | | |
-| 12 | Exit codes 1 / 3 / 4 reproduced | documented | | |
-| 13 | `/editor`, `!` shell escape, interactive `sudo`/`ssh` prompts under attach | documented features | | |
-| 14 | `Ctrl+Z` behavior in the current TUI | issue 6864 | | |
-| 15 | `KIRO_NO_SYNCHRONIZED` needed for clean rendering in our path | documented escape hatch | | |
-| 16 | Concurrent-session limits per account | unknown | | |
+## Observed facts and contradictions
 
-## Contradictions found
+| Probe | Observed | Consequence |
+| --- | --- | --- |
+| `kiro-cli --version` | Exit 0, `kiro-cli 2.32.0` | Tested build; V2 is an engine choice within the installed CLI, not a separately installed V2 executable. |
+| `kiro-cli chat --help` | Exit 0; advertises `--v2`, `--tui`, `--resume-id`, `--agent`, `--list-sessions`; engine help calls V2 the default | MVP explicitly selects `chat --v2 --tui`, independent of saved defaults. |
+| `kiro-cli chat --help-all` | Initial inherited-environment isolated run timed out at 20s; minimal-environment reruns exit 1 | Contradicts the plan's use of this command as a capability probe. Use the successful `chat --help`; do not infer features from a version alone. The exact failure cause is not established. |
+| `kiro-cli agent list --format json-pretty` in scratch cwd | Exit 1, reports not logged in | Cannot verify profile enumeration JSON or cwd scoping before login. MVP delegates the command to Kiro and surfaces its own output. |
+| `kiro-cli chat --v2 --list-sessions --format json` | Inherited-environment isolated run timed out at 8s; minimal-environment reruns exit 1 | Session-list schema and generation reporting remain unverified; no import/resume implementation. |
+| `chat --v2 --tui` on a scratch PTY | Emitted terminal sequences; stayed alive until explicitly terminated, with no prompt sent | Confirms executable startup and terminal I/O only, not authenticated chat, screen fidelity, or model behavior. |
+| Startup with KIRO_HOME, KIRO_DATA_DIR and XDG_DATA_HOME pointing to separate scratch paths | Kiro created `kiro/settings/cli.json` and `share/kiro-cli/data.sqlite3`; no database under KIRO_DATA_DIR | KIRO_DATA_DIR alone is not an isolation guarantee for this path/build. Probes isolate HOME and XDG roots as well. Kiro itself created these files in temporary state; the wrapper wrote no Kiro state. |
+| Real MVP `new --v2 --no-attach`, attach/detach twice, status | The same real Kiro PID remained `live` across both frontend exits | Real native-process persistence works before authentication. No prompts or model calls were made. |
+| Fake peer emits >2 MiB while disconnected | Finished output; same child reattached with bounded retained bytes | Host drains detached PTYs rather than letting the child block. |
+| Fake peer receives dimensions and arbitrary bytes | Resize reached 121x43 (protocol) and 117x39 (actual frontend); native control/non-UTF-8 bytes preserved | Validates forwarding and leader filter without interpreting Kiro output. |
+| Kill attached frontend with SIGKILL | Child PID survived; fresh frontend attached to it | Frontend lifetime is independent of the host-owned PTY. |
+| Detach and SIGTERM an attached frontend | Exited and restored canonical terminal mode | Normal/signal cleanup verified in a real controlling PTY. |
+| Competing host and SIGKILL host/restart | One host owns the lifetime flock; former live metadata becomes failed with recovery notice | No child restart, resume, or prompt replay. Saved PIDs are never signal targets. |
+| Fake missing agent | Exit 4 recorded as failed | Verifies wrapper exit handling only; the real CLI's missing-agent behavior remains login-dependent. |
 
-(none yet)
+## P0 questions still unresolved
 
-## Decisions forced by findings
+The original sixteen-question P0 matrix remains open where it depends on an
+authenticated real session or V3. No fake-peer result establishes a Kiro storage
+contract.
 
-(none yet)
+| Original questions | Status |
+| --- | --- |
+| 1–4: V3 store, lock format, cross-generation resume, duplicate session UUID behavior | Deferred; login required. MVP neither reads Kiro history nor resumes by UUID. |
+| 5: concurrent real conversations in one cwd | Deferred; login required. Fake tests cover multiple managed children only. |
+| 6: real Kiro detached-output stall threshold | Deferred; no model output generated. Fake peer verifies host drain beyond 2 MiB. |
+| 7: forced same-size resize repaints native Kiro | Manual authenticated visual check required. Signal delivery is tested, repaint fidelity is not. |
+| 8–9: profile JSON, workspace/global/legacy scope, KIRO_AGENT_CONFIG_DIR | Blocked by login; no profile scanner or synthesis. |
+| 10–11: V3 hooks and global hook loading | Deferred with V3/telemetry; no hook installed. |
+| 12: real exit codes 1/3/4 | Exit 1 observed for logged-out agent listing; real missing-agent/MCP startup codes unverified. |
+| 13–15: editor, shell escapes, subprocess prompts, Ctrl+Z, synchronized rendering | Manual native-session acceptance required. No override of KIRO_NO_SYNCHRONIZED. |
+| 16: account concurrency limits | Unverified; no paid calls made. |
+
+## Scope decisions
+
+Per the user's request, proceed with the minimal V2 process-persistence MVP while
+keeping all features that rely on unresolved probes absent. Wrapper IDs are
+process identifiers, never minted Kiro UUIDs. Reattach uses the already-live
+child. No automatic resume, history import, idle eviction, telemetry, turn-state
+inference, V3, or unattended tool approval.
+
+The architecture's proposed child-stderr host log conflicts with repository
+privacy rules. Corrected the target document; the MVP persists metadata only and
+keeps the bounded output ring in memory. See [MVP review](MVP.md) for scope and
+manual acceptance steps.
+
+## Native exit cursor regression — user feedback
+
+The user reported that native Kiro leaves retained text with the shell cursor
+below it, while exiting through the wrapper restores a cursor near the top and
+shell input overwrites retained text (Guacamole SSH). The registry's exited
+rows record child exit code 0; they are not evidence of a host crash.
+
+Inspection found that frontend cleanup always emitted DECRST 1049, including
+after normal child exit. That control sequence switches to the normal screen
+and restores the saved cursor ([XTerm control sequence reference](https://invisible-island.net/xterm/ctlseqs/ctlseqs-contents.html)).
+It can therefore undo the cursor position left by Kiro's own cleanup. Existing
+canonical-mode tests did not catch cursor-moving output.
+
+Cleanup now distinguishes child exit from detach/interruption. On child exit it
+preserves the native screen/cursor, restores input modes, and adds a newline;
+it sends no alternate-screen reset. On detach it resets the screen mode and
+scroll region and positions the cursor on the bottom row before the newline.
+No child output is parsed. The terminal smoke now checks that native exit
+forwards the final text without any added alternate-screen reset or screen
+clear, and that detach positions the shell below retained content. This is
+sequence-level PTY coverage. The user subsequently confirmed that the cursor
+fix works through Guacamole SSH, and that native TUI detach/reattach works,
+including returning to a pending permission prompt. Active real-task progress
+while detached has not been manually validated. See the
+[MVP v1 journal](journal/MVP-V1.md) for the acceptance record and remaining gaps.
+
+## MVP v2 baseline review: status response budget
+
+Pi review found a metadata/protocol budget mismatch in the v1 host. Independently
+reproduced with an owned test host and a temporary registry of 1,200 exited
+metadata rows (cwd `/tmp/status-limit-project`): registry 236,402 bytes, compact
+`Sessions` reply 171,614 bytes. `status --json` exited 1 with
+`IPC connection closed` and no rows. No real Kiro was launched. A 900-row fixture
+with shorter paths remained below the wire cap and succeeded; the threshold
+depends on metadata length, not a fixed row count.
+
+The registry permits 2 MiB while each IPC frame permits only 128 KiB. The send
+error closes the connection; this contradicts any assumption that every valid
+registry fits a status response. MVP v2 must keep refresh errors recoverable in
+the board. Pagination or a revised metadata response budget remains follow-up
+work; the board does not delete historical records to conceal this limit.
+
+
+## MVP v3 transition and picker regressions — 2026-10-26
+
+A temporary IPC peer delayed its attach response while a real frontend PTY was
+observed. The MVP v2 board emitted alternate-screen leave before the ACK,
+exposing the shell during the wait. The integrated v3 board keeps its existing
+screen and raw mode through delayed/refused ACKs; native output begins only
+after a successful ACK and display handoff. Board return avoids standalone
+shell cursor/newline cleanup, while standalone cleanup regressions still pass.
+
+Fake-CLI PTY checks establish arrow-only directory/profile creation, stable PIDs
+through switching, child-mode reset, native exit returning to the board, slow
+discovery cancellation, and retry after listing failure. An unchanged idle
+board writes fewer than 128 terminal bytes over a 1.3-second refresh interval.
+This checks redraw suppression, not native Kiro startup or inference speed.
+
+The first threaded capture implementation could wait indefinitely for stdout
+inherited by a descendant after killing its immediate listing child. Capture
+now reads nonblockingly against a deadline and stops its own process group
+before reaping. Cancellation joins and reaps the owned listing. Tests cover a
+shell/sleep inherited pipe, output overflow, cancellation, and valid empty lists.
+Filesystem listing caps all examined entries, including files, at 2,000.
+
+Native agent enumeration schema remains unverified; fixture JSON is not proof
+of a real Kiro contract. Unknown output offers the Kiro default or an explicit
+manually entered name. No real Kiro session, account state, or model call was
+used for these checks. Guacamole visual acceptance of the new transitions
+remains a manual follow-up; prior native repaint limits still apply.
