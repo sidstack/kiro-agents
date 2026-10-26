@@ -5,6 +5,14 @@ Conventional Commits by release-please.
 
 ## Local MVP history (before automated releases)
 
+## [0.4.1](https://github.com/sidstack/kiro-agents/compare/v0.4.0...v0.4.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* decouple session names from the live host version ([#17](https://github.com/sidstack/kiro-agents/issues/17)) ([d92d954](https://github.com/sidstack/kiro-agents/commit/d92d954d503bcf55a3a54c4415e20c7ab7c0cbe9))
+* **installer:** wait for pending release assets ([#15](https://github.com/sidstack/kiro-agents/issues/15)) ([0dbbde5](https://github.com/sidstack/kiro-agents/commit/0dbbde5d69cf3ece9153afb39f4067182a75b6fd))
+
 ## [0.4.0](https://github.com/sidstack/kiro-agents/compare/v0.3.0...v0.4.0) (2026-10-26)
 
 
