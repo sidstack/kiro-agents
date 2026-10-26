@@ -329,7 +329,10 @@ fn sessions(dir: &Path) -> Result<Vec<SessionInfo>> {
         return Ok(Vec::new());
     }
     match host::call(dir, Action::Status, true)? {
-        Reply::Sessions(rows) => Ok(rows),
+        Reply::Sessions(mut rows) => {
+            crate::custom_names::enrich(dir, &mut rows)?;
+            Ok(rows)
+        }
         _ => anyhow::bail!("Unexpected status response"),
     }
 }
@@ -416,10 +419,12 @@ pub fn run(dir: &Path) -> Result<()> {
                 last_refresh = Instant::now();
             }
             Some(Effect::Rename { id, name }) => {
-                match host::call(dir, Action::Rename { id, name }, false) {
-                    Ok(Reply::Ok) => { app.mode = Mode::Browse; app.message = "Session name updated.".into(); }
-                    Ok(_) => app.message = "Unexpected rename response".into(),
-                    Err(error) => app.message = format!("Rename failed: {error:#}. Older hosts require an explicit restart when safe."),
+                match crate::custom_names::set(dir, &id, name) {
+                    Ok(()) => {
+                        app.mode = Mode::Browse;
+                        app.message = "Session name updated.".into();
+                    }
+                    Err(error) => app.message = format!("Rename failed: {error:#}"),
                 }
                 refresh = Some(refresh_task(dir));
                 dirty = true;

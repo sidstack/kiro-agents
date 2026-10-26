@@ -99,8 +99,14 @@ fn main() -> Result<()> {
             let reply = host::call(&dir, Action::New { cwd, agent }, true)?;
             if let Reply::Created(session) = reply {
                 if let Some(name) = name {
-                    host::call(&dir, Action::Rename { id: session.id.clone(), name: Some(name) }, false)
-                        .with_context(|| format!("Session {} was created, but naming failed. An older live host may need an explicit restart after its sessions are stopped", session.id))?;
+                    kiro_agents::custom_names::set(&dir, &session.id, Some(name)).with_context(
+                        || {
+                            format!(
+                                "Session {} was created, but saving its name failed",
+                                session.id
+                            )
+                        },
+                    )?;
                 }
                 if !no_attach && io::stdin().is_terminal() && io::stdout().is_terminal() {
                     attach::run(&dir, session.id.clone()).with_context(|| {
@@ -138,7 +144,11 @@ fn main() -> Result<()> {
             let name = name
                 .map(|name| kiro_agents::features::validate_name(&name))
                 .transpose()?;
-            host::call(&dir, Action::Rename { id, name }, false)?;
+            anyhow::ensure!(
+                sessions(&dir)?.iter().any(|row| row.id == id),
+                "Unknown session ID"
+            );
+            kiro_agents::custom_names::set(&dir, &id, name)?;
             Ok(())
         }
         Command::Stop { id } => {
@@ -163,7 +173,10 @@ fn sessions(dir: &Path) -> Result<Vec<SessionInfo>> {
         return Ok(Vec::new());
     }
     match host::call(dir, Action::Status, true)? {
-        Reply::Sessions(rows) => Ok(rows),
+        Reply::Sessions(mut rows) => {
+            kiro_agents::custom_names::enrich(dir, &mut rows)?;
+            Ok(rows)
+        }
         _ => anyhow::bail!("Unexpected host response"),
     }
 }

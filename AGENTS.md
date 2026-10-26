@@ -160,3 +160,9 @@ manual names remain available. See `docs/SESSION-NAMES.md` for bounds and compat
 Installer changes must retain checksum/archive/version verification and atomic replacement,
 never require sudo or restart hosts. Tests use local mocked release downloads and a temporary
 installation directory; keep the default latest channel stable, with explicit beta selection.
+
+Naming upgrade compatibility: custom labels are shared persistent metadata in private names.json,
+not an RPC requirement or a reason to restart live hosts. Status enrichment must support
+pre-naming hosts. Keep the actual v0.2.0 compatibility regression (synthetic old peer in
+CI), unique unnamed-session labels, and version-independent rendering snapshots. Do not
+claim automatic SQLite TUI titles until ownership mapping is verified; do not guess by cwd.

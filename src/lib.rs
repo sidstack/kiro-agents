@@ -1,5 +1,6 @@
 pub mod attach;
 pub mod board;
+pub mod custom_names;
 pub mod features;
 pub mod host;
 pub mod kiro;

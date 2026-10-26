@@ -203,3 +203,13 @@ at the cost of one Kiro process per session.
 Optional behavior lives in independent feature modules behind one `SessionFeature`-style
 trait (history import, navigation keys, status line, idleness, naming), assembled at one
 configuration point. Core never imports a concrete feature.
+
+## Implemented upgrade boundary (naming compatibility fix)
+
+The long-lived host owns process/PTY lifecycle independently of any dashboard.
+Presentation metadata lives in a shared, locked, atomically updated names.json under
+wrapper state, outside dashboard process memory and independent of host IPC version.
+Updated frontends use that state-store API to name/clear sessions even when connected
+to a pre-naming host; they do not rewrite its registry or restart its processes.
+Lifecycle actions still go through the host's existing versioned protocol. This is
+dashboard/metadata upgrade compatibility, not hot replacement of a PTY-owning daemon.

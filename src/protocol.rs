@@ -63,9 +63,10 @@ impl SessionInfo {
                     .and_then(|name| name.to_str())
                     .unwrap_or(&self.cwd);
                 format!(
-                    "{} · {}",
+                    "{} · {} · #{}",
                     project,
-                    self.agent.as_deref().unwrap_or("Kiro default")
+                    self.agent.as_deref().unwrap_or("Kiro default"),
+                    self.id
                 )
             })
     }
