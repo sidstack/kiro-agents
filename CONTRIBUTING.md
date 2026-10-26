@@ -30,6 +30,17 @@ changes in an issue first.
 This is an independent project, not affiliated with or endorsed by Amazon,
 Kiro, OpenAI or Pi. Respect their trademarks and do not copy their branding.
 
+Dependency maintenance uses one weekly Dependabot multi-ecosystem PR covering Cargo
+and GitHub Actions. Review upstream breaking changes even when grouped, and require
+all checks plus RustSec to pass; grouping does not enable automatic merging. Security
+alerts remain enabled independently of the weekly version-update schedule. Split a
+problematic update out when it blocks otherwise useful maintenance.
+
+Use `fix(deps):` for dependency changes shipped in the executable so Release Please
+proposes a patch release. For a batch that only changes CI/development tooling, use a
+`chore(deps):` squash title to avoid an unnecessary application release. The generated
+release PR remains separate: merge it when ready to publish the next binary.
+
 Branch pushes also run the Branch beta workflow: the full integration suite and
 RustSec audit, followed by all six PTY scripts against the extracted optimized beta
 binary. Same-repository builds publish GitHub prereleases for manual testing before
