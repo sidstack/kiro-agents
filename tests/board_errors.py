@@ -48,7 +48,7 @@ def scenario(oversized):
                          generation="v2", pid=None, state="exited", exit_code=0,
                          notice=None) for n in range(1200)]
             (state / "registry.json").write_text(json.dumps(rows))
-        env = dict(os.environ, KIRO_AGENTS_HOME=str(state), TERM="xterm-256color",
+        env = dict(os.environ, HOME=str(state.parent), KIRO_AGENTS_HOME=str(state), TERM="xterm-256color",
                    KIRO_AGENTS_KIRO_BIN=str(ROOT / "tests/fake-kiro/kiro-cli"))
         env["KIRO_HOME"] = env["KIRO_AGENTS_HOME"] + "/kiro"
         env["KIRO_SESSIONS_DIR"] = env["KIRO_HOME"] + "/sessions/cli"

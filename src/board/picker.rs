@@ -1,4 +1,6 @@
+use super::directories::DirectoryScan;
 use crate::kiro;
+use std::collections::HashSet;
 use std::{
     env,
     path::{Path, PathBuf},
@@ -7,8 +9,6 @@ use std::{
 
 /// Directories offered per listing; keeps a picker scan bounded and fast.
 pub const MAX_LISTING: usize = 200;
-/// Candidates shown at once; the rest stay behind the search query.
-pub const MAX_CANDIDATES: usize = 40;
 /// Recent session directories offered from the board registry.
 pub const RECENT_LIMIT: usize = 12;
 
@@ -26,6 +26,7 @@ pub enum Origin {
     Directory,
     /// A sibling of the listed directory, for bare project fragments.
     Sibling,
+    Recursive,
 }
 
 impl Origin {
@@ -37,6 +38,7 @@ impl Origin {
             Origin::Typed => "typed",
             Origin::Directory => "dir",
             Origin::Sibling => "sibling",
+            Origin::Recursive => "dir",
         }
     }
 }
@@ -58,17 +60,29 @@ pub struct DirPicker {
     pub truncated: bool,
     pub notice: Option<String>,
     pub(super) recents: Vec<String>,
+    pub(super) discovery: Option<DirectoryScan>,
+    pub(super) indexed: Vec<String>,
+    pub(super) scanning: bool,
+    pub(super) scan_limited: bool,
 }
 
 impl DirPicker {
     pub fn open(base: String, recents: Vec<String>) -> Self {
         let mut picker = Self {
-            base,
+            base: base.clone(),
             query: String::new(),
             candidates: Vec::new(),
             selected: 0,
             truncated: false,
             notice: None,
+            discovery: if cfg!(test) {
+                None
+            } else {
+                Some(DirectoryScan::start(&base, false))
+            },
+            indexed: Vec::new(),
+            scanning: !cfg!(test),
+            scan_limited: false,
             recents,
         };
         picker.rebuild();
@@ -92,7 +106,7 @@ impl DirPicker {
         let query = self.query.trim().to_owned();
         let lower = query.to_lowercase();
         let mut rows: Vec<Candidate> = Vec::new();
-        let mut seen: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
         let mut truncated = false;
 
         // A query that is itself a path always wins, including `~` and
@@ -105,7 +119,7 @@ impl DirPicker {
                 .and_then(|path| path.to_str().map(str::to_owned))
         };
         if let Some(target) = &target {
-            seen.push(target.clone());
+            seen.insert(target.clone());
             rows.push(Candidate {
                 path: target.clone(),
                 origin: Origin::Typed,
@@ -128,7 +142,7 @@ impl DirPicker {
         let fragment_lower = fragment.to_lowercase();
 
         if query.is_empty() {
-            seen.push(self.base.clone());
+            seen.insert(self.base.clone());
             rows.push(Candidate {
                 path: self.base.clone(),
                 origin: Origin::Here,
@@ -137,14 +151,14 @@ impl DirPicker {
                 if path == self.base || seen.contains(&path) {
                     continue;
                 }
-                seen.push(path.clone());
+                seen.insert(path.clone());
                 rows.push(Candidate {
                     path,
                     origin: Origin::Recent,
                 });
             }
             if let Some(parent) = parent_of_opt(&self.base) {
-                seen.push(parent.clone());
+                seen.insert(parent.clone());
                 rows.push(Candidate {
                     path: parent,
                     origin: Origin::Parent,
@@ -153,15 +167,11 @@ impl DirPicker {
             let (names, cut) = kiro::subdirectories(Path::new(&self.base), MAX_LISTING);
             truncated = cut;
             for name in names {
-                if rows.len() >= MAX_CANDIDATES {
-                    truncated = true;
-                    break;
-                }
                 let path = join(&self.base, &name);
                 if seen.contains(&path) {
                     continue;
                 }
-                seen.push(path.clone());
+                seen.insert(path.clone());
                 rows.push(Candidate {
                     path,
                     origin: Origin::Directory,
@@ -208,26 +218,61 @@ impl DirPicker {
                     }
                 }
             }
+            // Match the entire home-relative path, including nested fragments.
+            // Leading /, ~ and . preserve explicit filesystem browsing semantics.
+            if !query.starts_with(['/', '~', '.']) {
+                let home = env::var_os("HOME").map(PathBuf::from);
+                for path in &self.indexed {
+                    let relative = home
+                        .as_ref()
+                        .and_then(|home| {
+                            Path::new(path)
+                                .strip_prefix(home)
+                                .ok()
+                                .map(|p| p.to_string_lossy().into_owned())
+                        })
+                        .unwrap_or_else(|| path.clone());
+                    if let Some(score) = max_score(
+                        fuzzy_score(&lower, &file_name(path)),
+                        fuzzy_score(&lower, &relative),
+                    ) {
+                        ranked.push((score, Origin::Recursive, path.clone()));
+                    }
+                }
+            }
             ranked.sort_by(|a, b| {
                 b.0.cmp(&a.0)
                     .then_with(|| origin_rank(a.1).cmp(&origin_rank(b.1)))
-                    .then_with(|| file_name(&a.2).cmp(&file_name(&b.2)))
+                    .then_with(|| {
+                        Path::new(&a.2)
+                            .file_name()
+                            .cmp(&Path::new(&b.2).file_name())
+                    })
             });
-            let room = MAX_CANDIDATES.saturating_sub(rows.len());
-            if ranked.len() > room {
-                truncated = true;
-                ranked.truncate(room);
-            }
             for (_, origin, path) in ranked {
                 if seen.contains(&path) {
                     continue;
                 }
-                seen.push(path.clone());
+                seen.insert(path.clone());
                 rows.push(Candidate { path, origin });
             }
         }
 
-        self.truncated = truncated;
+        if query.is_empty() {
+            for path in &self.indexed {
+                if seen.insert(path.clone()) {
+                    rows.push(Candidate {
+                        path: path.clone(),
+                        origin: Origin::Recursive,
+                    });
+                }
+            }
+        }
+        self.truncated = if self.discovery.is_some() {
+            self.scan_limited
+        } else {
+            truncated
+        };
         self.candidates = rows;
         self.selected = match anchor {
             Some(path) => self
@@ -249,6 +294,25 @@ impl DirPicker {
         } else {
             None
         };
+    }
+
+    pub fn poll_directories(&mut self) -> bool {
+        let Some(listing) = self.discovery.as_ref().and_then(DirectoryScan::poll) else {
+            return false;
+        };
+        self.indexed = listing.paths;
+        self.scanning = listing.scanning;
+        self.scan_limited = listing.limited;
+        // An unedited list preserves manual navigation; a typed query chooses
+        // the best match when a newly discovered directory arrives.
+        self.rebuild_ranking(self.query.is_empty() || self.selected != 0);
+        true
+    }
+
+    pub fn refresh(&mut self) {
+        self.discovery = Some(DirectoryScan::start(&self.base, true));
+        self.scanning = true;
+        self.rebuild();
     }
 
     fn recent_paths(&self) -> Vec<String> {
@@ -369,6 +433,7 @@ fn origin_rank(origin: Origin) -> u8 {
         Origin::Parent => 3,
         Origin::Directory => 4,
         Origin::Sibling => 5,
+        Origin::Recursive => 6,
     }
 }
 
@@ -954,7 +1019,31 @@ mod tests {
         }
         let picker = DirPicker::open(root.path().to_string_lossy().to_string(), Vec::new());
         assert!(picker.truncated);
-        assert!(picker.candidates.len() <= MAX_CANDIDATES);
+        assert!(picker.candidates.len() <= MAX_LISTING + 2);
+    }
+
+    #[test]
+    fn recursive_index_keeps_all_rows_and_matches_nested_path_fragments() {
+        let root = tempfile::tempdir().unwrap();
+        let base = root.path().to_string_lossy().into_owned();
+        let mut picker = DirPicker::open(base.clone(), Vec::new());
+        picker.indexed = (0..300)
+            .map(|i| format!("{base}/projects/group{i:03}/deep-app"))
+            .collect();
+        picker.rebuild();
+        assert!(picker.candidates.len() >= 300);
+        for ch in "group299/dapp".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.candidates.len(), 1);
+        assert!(picker.accept().unwrap().ends_with("/group299/deep-app"));
+        picker.clear_query();
+        for ch in "deep-app".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.candidates.len(), 300);
+        picker.move_selection(299);
+        assert_eq!(picker.selected, 299);
     }
 
     #[test]

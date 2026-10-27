@@ -150,3 +150,13 @@ and its temporary credential copies removed after workers disconnected.
 - Validate the actual PTY detach path and regression coverage for forwarded keys.
 
 - Preserve Kiro’s Ctrl+G crew shortcut and verify raw-mode IXON is disabled.
+
+### Recursive directory picker and daily cache
+
+- [x] Match nested directories under home, with a cwd root outside home.
+- [x] Discover off the input path and retain all results for scrolling/ranking.
+- [x] Reuse a private directory cache for 24 hours; refresh stale lists in the
+  background and support Ctrl+R to force refresh.
+- [x] Keep selection-only creation and explicit-path fallback, bounded scans,
+  cancellation, and no fd/fzf runtime dependency.
+- [x] Add model, cache, and real-PTY regression coverage.

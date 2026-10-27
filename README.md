@@ -92,13 +92,22 @@ kiro-agents shutdown            # stop all owned sessions and the host
 The board requires an interactive input and output terminal; piped output is a
 plain session list. Up/Down or j/k selects, Enter attaches, Tab switches Live/All,
 and / searches. Esc clears search or cancels a form. Ctrl+N opens a directory picker
-with current/recent projects and filesystem browsing, followed by a searchable
+with current/recent projects and recursive fuzzy search under your home directory
+(and the current directory when it is outside home), followed by a searchable
 list of native Kiro agents for the chosen directory. Type a fuzzy query and press
 Enter to select the best match; arrow keys are optional. Both legacy BS and DEL
 Backspace encodings edit the query. Typing a path is also supported. Tab or Right Arrow
 browses a directory; Left Arrow goes to its parent;
 Ctrl+U clears the query and Ctrl+R retries discovery. Esc from the agent list goes
-back to the directory picker. Ctrl+K asks before stopping the selected live
+back to the directory picker. Directory discovery runs in the background and caches
+its list for 24 hours across launches under wrapper state (`directory-cache/`).
+Expired lists stay usable while refreshing; Ctrl+R forces a new scan. New directories
+appear after refresh; explicit paths work immediately. Hidden directories, symlinks,
+`node_modules`, `venv`, `__pycache__`, `backup`, `snap`, and Rust `target` directories
+are skipped. All discovered matches remain scrollable, with no top-40 cutoff.
+Scans stop at 100,000 directories, 500,000 filesystem entries, or 15 seconds and
+show a limit notice; unreadable directories are skipped. Cache failures fall back
+to discovery without blocking the picker. Ctrl+K asks before stopping the selected live
 session. F2 names a session; an empty name restores its automatic title. The board
 prefers a manual name, then an exactly matched native Kiro title, a short first-prompt
 title, and directory/agent plus a unique ID as the fallback. F2 names work even with an

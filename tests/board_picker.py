@@ -6,13 +6,14 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
-from board_smoke import Board, BINARY, ROOT
+from board_smoke import BINARY, ROOT
+from board_probe import Probe
 
 with tempfile.TemporaryDirectory(prefix='kiro-picker-test-') as tmp:
     scratch = Path(tmp)
     fixture = scratch / 'agents.json'
     fixture.write_text(json.dumps({'agents': [{'name': 'reviewer'}]}))
-    env = dict(os.environ, KIRO_AGENTS_HOME=str(scratch / 'state'),
+    env = dict(os.environ, HOME=str(scratch), KIRO_AGENTS_HOME=str(scratch / 'state'),
                KIRO_AGENTS_KIRO_BIN=str(ROOT / 'tests/fake-kiro/kiro-cli'),
                KIRO_AGENTS_FAKE_AGENT_FIXTURE=str(fixture),
                KIRO_AGENTS_FAKE_AGENT_LIST_DELAY='1.2', TERM='xterm-256color')
@@ -23,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='kiro-picker-test-') as tmp:
     def call(*args):
         return subprocess.check_output([str(BINARY), *args], env=env, timeout=8)
 
-    board = Board(env)
+    board = Probe(env)
     try:
         # An idle board writes nothing on periodic status refresh.
         board.drain(0.3)
@@ -32,9 +33,10 @@ with tempfile.TemporaryDirectory(prefix='kiro-picker-test-') as tmp:
         assert len(board.frames) < 128, f'Idle board kept redrawing: {len(board.frames)} bytes'
         board.press(b'\x0e')
         board.wait(b'New session: directory')
+        board.absorb()
         board.frames = b''
         board.press(b'\r')
-        board.wait(b'Discovering agents')
+        board.wait_for('Discovering agents')
         started = time.monotonic()
         board.frames = b''
         board.press(b'\x1b')
