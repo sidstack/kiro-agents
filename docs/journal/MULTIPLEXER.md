@@ -69,3 +69,8 @@ covering runtime-thread launchers; the prior SQLite-only inference was incorrect
 for the observed installation. Local `make check` passed (81 Rust tests, eleven
 PTY scenarios and packaging tests), as did strict `make audit`. See the incident
 report and findings; real authenticated/browser acceptance remains manual.
+
+Wheel follow-up: enable mouse reporting on the private server and translate wheel
+up/down to PageUp/PageDown for the hovered pane, preserving tmux copy mode. The PTY
+regression sends real SGR mouse input and rejects history-arrow bytes and delivery
+to the wrong pane. Direct sessions retain native wheel passthrough.

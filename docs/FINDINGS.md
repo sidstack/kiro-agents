@@ -227,3 +227,14 @@ had no conversation rows; its descriptor alone did not identify the active sessi
 No auth rows, transcript text or native titles were printed. The real sessions were
 stopped during containment, so the new behavior is verified with isolated delegated
 fake-Kiro fixtures rather than claiming a live authenticated acceptance result.
+
+## Workspace wheel paging (2026-10-27)
+
+The user confirmed native scrolling works outside tmux for the same Kiro session,
+while workspace wheel input cycles prior prompts. The private server previously
+left mouse reporting off, allowing the outer terminal's alternate-screen scrolling
+to generate Up/Down. Workspace configuration now enables mouse reporting and maps
+wheel up/down to PageUp/PageDown in the hovered pane. Copy-mode wheel events remain
+with tmux; direct attached input handling is unchanged. A real tmux client PTY test
+sends SGR wheel events and verifies page-key bytes, no history arrows, correct pane
+targeting, and copy-mode isolation. Browser/Guacamole acceptance remains manual.

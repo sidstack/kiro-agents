@@ -3,6 +3,7 @@
 import json
 import fcntl
 import os
+import re
 from pathlib import Path
 import shutil
 import select
@@ -175,6 +176,18 @@ def main():
             wait(lambda: tmux('list-clients', '-F', '#{session_name}').strip() == 'test', 'owned client did not switch back')
             cli('workspace', 'close', 'alternate')
             assert len(panes()) == 2, 'reopening workspace created extra panes'
+            assert tmux('show-options', '-gv', 'mouse').strip() == 'on'
+            # Real SGR wheel input must page the hovered (not focused) Kiro pane.
+            # Never use send-keys here: it bypasses tmux's mouse bindings.
+            tmux('select-pane', '-t', first)
+            x, y = map(int, tmux('display-message', '-p', '-t', second, '#{pane_left} #{pane_top}').split())
+            def received(pane):
+                return ''.join(re.findall(r'BYTES:([0-9a-f]+)', ''.join(capture(pane).split())))
+            for button, expected in [(64, '1b5b357e'), (65, '1b5b367e')]:
+                press(f'\x1b[<{button};{x + 3};{y + 3}M'.encode())
+                wait(lambda: expected in received(second), 'mouse wheel did not reach hovered Kiro as PageUp/PageDown')
+                assert expected not in received(first), 'wheel input reached focused pane instead of hovered pane'
+            assert '1b5b41' not in received(second) and '1b5b42' not in received(second), 'wheel became prompt-history arrows'
             tmux('select-pane', '-t', first)
             press(b'\x02z')
             wait(lambda: tmux('display-message', '-p', '-t', first, '#{window_zoomed_flag}').strip() == '1', 'prefix z did not zoom')
@@ -207,6 +220,10 @@ def main():
             wait(lambda: int(tmux('display-message', '-p', '-t', first, '#{pane_width}')) > width, 'prefix Ctrl+Arrow did not resize')
             press(b'\x02[')
             wait(lambda: tmux('display-message', '-p', '-t', first, '#{pane_in_mode}').strip() == '1', 'prefix [ did not enter scrollback')
+            x, y = map(int, tmux('display-message', '-p', '-t', first, '#{pane_left} #{pane_top}').split())
+            press(f'\x1b[<64;{x + 3};{y + 3}M'.encode())
+            assert tmux('display-message', '-p', '-t', first, '#{pane_in_mode}').strip() == '1', 'wheel disrupted tmux copy mode'
+            assert '1b5b357e' not in received(first), 'copy-mode wheel leaked PageUp into Kiro'
             press(b'q')
             wait(lambda: tmux('display-message', '-p', '-t', first, '#{pane_in_mode}').strip() == '0', 'copy mode did not close')
             press(b'\x02"')

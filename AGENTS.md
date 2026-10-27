@@ -190,3 +190,8 @@ closed pane frontends exit, not only that tmux removed a pane. The bounded CPU/P
 EOF regression runs in make check and against extracted betas. Native title ownership
 may use a bounded, start-time-checked descendant parent chain; main-thread children
 lists alone miss Kiro's runtime-thread launcher chain. See docs/INCIDENT-2026-10-26-CPU.md.
+
+Workspace mouse wheel events send PageUp/PageDown to the hovered pane, never Up/Down
+prompt-history keys. Enable/report mouse only on the private workspace server and
+preserve tmux copy-mode wheel behavior. Keep real-client SGR wheel regression coverage;
+do not change direct native attach wheel/PageUp byte passthrough.

@@ -276,6 +276,31 @@ impl TmuxWorkspace {
     fn configure_server(&self) -> Result<()> {
         let board = self.pane_command(false)?;
         let shell = self.pane_command(true)?;
+        // Capture wheel events before the outer terminal translates alternate-screen
+        // scrolling into Up/Down (prompt history). Page the hovered pane instead.
+        self.run(
+            &["set-option", "-g", "mouse", "on"],
+            "Could not enable workspace mouse input",
+        )?;
+        for (wheel, key) in [("WheelUpPane", "PPage"), ("WheelDownPane", "NPage")] {
+            let page = format!("send-keys -t = {key}");
+            self.run(
+                &[
+                    "bind-key",
+                    "-T",
+                    "root",
+                    wheel,
+                    "if-shell",
+                    "-F",
+                    "-t",
+                    "=",
+                    "#{pane_in_mode}",
+                    "send-keys -M -t =",
+                    &page,
+                ],
+                "Could not set workspace wheel paging",
+            )?;
+        }
         for (key, command, direction, program) in [
             ("%", "split-window", "-h", &board),
             ("\"", "split-window", "-v", &board),
