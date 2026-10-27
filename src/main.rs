@@ -29,7 +29,7 @@ enum Command {
     },
     /// Open the session board (plain list when piped)
     Board,
-    /// Start a fresh V2 session and attach (Ctrl+G detaches)
+    /// Start a fresh V2 session and attach (Ctrl+Q detaches)
     New {
         #[arg(default_value = ".")]
         dir: PathBuf,
@@ -71,10 +71,18 @@ enum Command {
     Doctor,
     #[command(name = "__host", hide = true)]
     Host,
+    #[command(name = "__workspace-board", hide = true)]
+    WorkspaceBoard,
+    #[command(name = "__workspace-session", hide = true)]
+    WorkspaceSession { id: String },
+    #[command(name = "__workspace-home", hide = true)]
+    WorkspaceHome,
 }
 
 #[derive(Subcommand)]
 enum WorkspaceCommand {
+    /// Open the centered session dashboard in this workspace
+    Dashboard,
     /// Open/create a named workspace; each Kiro pane starts at the session board
     Open {
         #[arg(default_value = "main")]
@@ -115,6 +123,7 @@ fn workspace(command: Option<WorkspaceCommand>) -> Result<()> {
         dir: PathBuf::from("."),
         detach: false,
     }) {
+        WorkspaceCommand::Dashboard => feature.dashboard(),
         WorkspaceCommand::Open { name, dir, detach } => feature.open(&name, &dir, detach),
         WorkspaceCommand::Split {
             vertical,
@@ -147,6 +156,28 @@ fn main() -> Result<()> {
     let dir = state_dir()?;
     match cli.command.unwrap_or(Command::Board) {
         Command::Host => host::run(dir),
+        Command::WorkspaceBoard => {
+            let feature = kiro_agents::workspace_feature()?;
+            board::run_popup(&dir, feature.as_ref())
+        }
+        Command::WorkspaceSession { id } => attach::run(&dir, id),
+        Command::WorkspaceHome => {
+            anyhow::ensure!(
+                kiro_agents::workspace_context()?.is_some(),
+                "Open this launcher through a workspace"
+            );
+            writeln!(
+                io::stdout(),
+                "Kiro workspace · Ctrl+Q opens the session dashboard"
+            )?;
+            writeln!(
+                io::stdout(),
+                "Choose a session to fill this empty launcher. Ctrl+B T opens a shell."
+            )?;
+            loop {
+                std::thread::park();
+            }
+        }
         Command::Workspace { command } => workspace(command),
         Command::Doctor => kiro::doctor(),
         Command::Agents { dir } => kiro::agents(&dir.canonicalize()?),
@@ -231,7 +262,11 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Board if io::stdin().is_terminal() && io::stdout().is_terminal() => {
-            board::run(&dir)
+            if let Some(workspace) = kiro_agents::workspace_context()? {
+                workspace.dashboard()
+            } else {
+                board::run(&dir)
+            }
         }
         Command::Board => display(&sessions(&dir)?),
     }
@@ -256,7 +291,7 @@ fn display(rows: &[SessionInfo]) -> Result<()> {
     let mut output = io::stdout().lock();
     writeln!(
         output,
-        "Kiro V2 sessions · Ctrl+G detaches · quitting leaves sessions alive"
+        "Kiro V2 sessions · Ctrl+Q detaches · quitting leaves sessions alive"
     )?;
     if rows.is_empty() {
         writeln!(

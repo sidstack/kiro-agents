@@ -55,7 +55,27 @@ pub enum SplitDirection {
     Vertical,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanePlacement {
+    Right,
+    Below,
+    Window,
+}
+
+/// Dropping a registration removes only this frontend's pane association.
+pub trait WorkspaceAttachment {}
+
 pub trait WorkspaceFeature: Send + Sync {
+    fn dashboard(&self) -> anyhow::Result<()>;
+    fn focus_session(&self, id: &str) -> anyhow::Result<bool>;
+    fn open_session(
+        &self,
+        id: &str,
+        cwd: &std::path::Path,
+        placement: PanePlacement,
+    ) -> anyhow::Result<()>;
+    fn register_attachment(&self, id: &str)
+        -> anyhow::Result<Option<Box<dyn WorkspaceAttachment>>>;
     fn open(&self, name: &str, cwd: &std::path::Path, detached: bool) -> anyhow::Result<()>;
     fn split(
         &self,

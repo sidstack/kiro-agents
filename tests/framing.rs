@@ -40,15 +40,15 @@ fn oversized_and_truncated_frames_are_rejected() {
 #[test]
 fn dashboard_shortcut_preserves_arrows_tmux_prefix_and_other_native_keys() {
     let mut leader = Leader::default();
-    let keys = b"\x03\x04\x18\x1b[D\x1bOD\x02d\x02\t\xff";
+    let keys = b"\x07\x03\x04\x18\x1b[D\x1bOD\x02d\x02\t\xff";
     assert_eq!(leader.filter(keys), (keys.to_vec(), false));
     assert_eq!(leader.filter(b"\x1b["), (b"\x1b[".to_vec(), false));
     assert_eq!(leader.filter(b"D"), (b"D".to_vec(), false));
     assert_eq!(
-        leader.filter(b"hello\x07ignored"),
+        leader.filter(b"hello\x11ignored"),
         (b"hello".to_vec(), true)
     );
-    assert_eq!(leader.filter(b"\x07"), (vec![], true));
+    assert_eq!(leader.filter(b"\x11"), (vec![], true));
 }
 
 #[test]

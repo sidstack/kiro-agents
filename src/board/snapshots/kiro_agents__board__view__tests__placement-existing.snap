@@ -1,0 +1,23 @@
+---
+source: src/board/view.rs
+expression: "render(&board, &existing, 100, 20, true)"
+---
+Kiro sessions
+  ┌Place session in the workspace────────────────────────────────────────────────────────────────┐
+  │session-one                                                                                   │
+  │Directory: /work/project                                                                      │
+  │  Split right (default)                                                                       │
+  │  Split below                                                                                 │
+  │› New window                                                                                  │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │↑/↓ choose · Enter confirms · v right · h below · w window                                    │
+  │Esc goes back without creating                                                                │
+  │The chosen pane receives the session; no active pane or shell is replaced.                    │
+  │                                                                                              │
+  └──────────────────────────────────────────────────────────────────────────────────────────────┘

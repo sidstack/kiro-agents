@@ -152,7 +152,7 @@ with tempfile.TemporaryDirectory(prefix="kiro-handoff-test-") as scratch:
             board.press(payload)
             board.wait(b"BYTES:" + payload.hex().encode())
 
-        # 3. The child takes private modes, then Ctrl+G returns to the
+        # 3. The child takes private modes, then Ctrl+Q returns to the
         #    board on the same screen: only child-mode resets are allowed.
         board.frames = b""
         board.press(b"screen")
@@ -160,7 +160,7 @@ with tempfile.TemporaryDirectory(prefix="kiro-handoff-test-") as scratch:
         board.press(b"\x1b[<64;1;1M")
         board.wait(b"BYTES:1b5b3c36343b313b314d")
         board.frames = b""
-        board.press(b"\x07")
+        board.press(b"\x11")
         board.wait(b"Kiro sessions")
         forbid(board.frames, "detach")
         assert b"\x1b[?2004l" in board.frames and b"\x1b[?1006l" in board.frames, \

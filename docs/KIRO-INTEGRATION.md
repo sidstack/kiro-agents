@@ -119,9 +119,9 @@ history search · `Ctrl+S` fuzzy search · `Ctrl+J` newline · `Ctrl+U` half-pag
 mode · `Esc` cancel · `!` shell escape · `/editor` opens `$EDITOR` · `/fullscreen` dedicated
 full-terminal view · `KIRO_NO_SYNCHRONIZED` escape hatch. **[doc]**
 
-The wrapper reserves Ctrl+G for detach/dashboard navigation by explicit user choice,
-overriding Kiro's crew shortcut while attached. Tmux retains Ctrl+B, and Left Arrow
-always passes through. There is no editor-state integration or configurable shortcut
+The wrapper reserves Ctrl+Q for detach/dashboard navigation. Kiro's crew shortcut
+Ctrl+G and tmux's Ctrl+B prefix retain their native behavior. Left Arrow always
+passes through. There is no editor-state integration or configurable shortcut
 in the current implementation.
 
 ## ACP (known, deliberately out of scope)

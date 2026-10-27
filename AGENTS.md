@@ -179,10 +179,12 @@ pre-naming hosts. Keep the actual v0.2.0 compatibility regression (synthetic old
 CI), unique unnamed-session labels, and version-independent rendering snapshots. Do not
 claim automatic SQLite TUI titles until ownership mapping is verified; do not guess by cwd.
 
-Attached frontend navigation uses Ctrl+G to return to the board. This explicit user
-choice replaces Kiro's native Ctrl+G crew shortcut while attached. Tmux retains its
-Ctrl+B prefix. Left Arrow always passes through: do not infer editor emptiness from
-keystrokes or parse terminal output to implement an empty-input shortcut.
+Attached frontend navigation uses Ctrl+Q alone to return to the dashboard. Preserve
+Kiro's native Ctrl+G crew shortcut and tmux's Ctrl+B prefix. Left Arrow always
+passes through; do not infer editor emptiness from keystrokes or terminal output.
+Navigation belongs to the frontend: relaunch it after installation without
+restarting the host or managed sessions. Test Ctrl+Q through a real PTY with raw
+mode/IXON verification, plus native Ctrl+G and Ctrl+B byte passthrough.
 
 Frontend lifecycle: keep Crossterm's use-dev-tty backend and explicit terminal-hangup
 exit checks; its mio backend can spin inside poll after PTY EOF/EIO. Tests must prove

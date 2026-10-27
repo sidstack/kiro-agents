@@ -4,7 +4,9 @@ mod screen;
 mod view;
 
 use crate::{
-    attach, host, kiro,
+    attach,
+    features::{PanePlacement, WorkspaceFeature},
+    host, kiro,
     protocol::{Action, Reply, SessionInfo},
 };
 use anyhow::Result;
@@ -34,15 +36,54 @@ enum Mode {
         id: String,
         query: String,
     },
+    Placement {
+        flow: PlacementFlow,
+        selected: usize,
+    },
+}
+
+/// What a confirmed pane placement applies to: an existing live session row or
+/// a pending creation whose directory/agent forms stay available behind Esc.
+enum PlacementFlow {
+    Existing {
+        id: String,
+        cwd: String,
+    },
+    Create {
+        cwd: String,
+        agent: Option<String>,
+        directory: DirPicker,
+        picker: Box<AgentPicker>,
+    },
 }
 
 enum Effect {
     Quit,
     Refresh,
     Attach(String),
-    Create { cwd: String, agent: Option<String> },
+    Create {
+        cwd: String,
+        agent: Option<String>,
+    },
+    /// Floating dashboard only: focus the selected live session in its pane.
+    Focus(String),
+    /// Floating dashboard only: place a live session through the workspace.
+    Open {
+        id: String,
+        cwd: String,
+        placement: PanePlacement,
+    },
+    /// Floating dashboard only: create after the placement is confirmed.
+    CreatePlaced {
+        cwd: String,
+        agent: Option<String>,
+        placement: PanePlacement,
+    },
     Stop(String),
-    Rename { id: String, name: Option<String> },
+    Rename {
+        id: String,
+        name: Option<String>,
+    },
 }
 
 struct App {
@@ -51,6 +92,7 @@ struct App {
     message: String,
     scan: Option<kiro::AgentScanHandle>,
     scan_token: u64,
+    popup: bool,
 }
 
 impl App {
@@ -139,11 +181,32 @@ impl App {
                     self.board.set_query(String::new());
                     self.mode = Mode::Search;
                 }
+                KeyCode::Esc if self.popup => return Some(Effect::Quit),
                 KeyCode::Esc => self.board.set_query(String::new()),
                 KeyCode::Char('r') => return Some(Effect::Refresh),
+                KeyCode::Char(ch @ ('v' | 'h' | 'w')) if self.popup => {
+                    if let Some(row) = self.board.selected().filter(|row| row.state == "live") {
+                        let placement = match ch {
+                            'v' => PanePlacement::Right,
+                            'h' => PanePlacement::Below,
+                            _ => PanePlacement::Window,
+                        };
+                        return Some(Effect::Open {
+                            id: row.id.clone(),
+                            cwd: row.cwd.clone(),
+                            placement,
+                        });
+                    }
+                    self.message =
+                        "Only a live session can be placed in a workspace pane; Ctrl+N creates one."
+                            .into();
+                }
                 KeyCode::Enter => {
                     if let Some(row) = self.board.selected() {
                         if row.state == "live" {
+                            if self.popup {
+                                return Some(Effect::Focus(row.id.clone()));
+                            }
                             return Some(Effect::Attach(row.id.clone()));
                         }
                         self.message = format!("Cannot attach: session is {}. Create a fresh session or use Kiro history manually.", row.state);
@@ -230,11 +293,66 @@ impl App {
                         Accepted::Default => None,
                         Accepted::Agent(name) | Accepted::Manual(name) => Some(name),
                     };
+                    if self.popup {
+                        let flow = PlacementFlow::Create {
+                            cwd: picker.cwd.clone(),
+                            agent,
+                            directory: directory.clone(),
+                            picker: Box::new(picker.clone()),
+                        };
+                        self.scan = None;
+                        self.mode = Mode::Placement {
+                            flow,
+                            selected: default_placement_index(),
+                        };
+                        self.message.clear();
+                        return None;
+                    }
                     let effect = Effect::Create {
                         cwd: picker.cwd.clone(),
                         agent,
                     };
                     self.scan = None;
+                    return Some(effect);
+                }
+                _ => (),
+            },
+            Mode::Placement { flow, selected } => match key.code {
+                KeyCode::Esc => {
+                    let back = match flow {
+                        PlacementFlow::Existing { .. } => Mode::Browse,
+                        PlacementFlow::Create {
+                            directory, picker, ..
+                        } => Mode::Agent {
+                            directory: directory.clone(),
+                            picker: picker.as_ref().clone(),
+                        },
+                    };
+                    self.mode = back;
+                    self.message.clear();
+                }
+                KeyCode::Up => *selected = selected.saturating_sub(1),
+                KeyCode::Down => *selected = (*selected + 1).min(PLACEMENTS.len() - 1),
+                code @ (KeyCode::Enter | KeyCode::Char('v' | 'h' | 'w')) => {
+                    let index = match code {
+                        KeyCode::Enter => *selected,
+                        KeyCode::Char('v') => 0,
+                        KeyCode::Char('h') => 1,
+                        _ => 2,
+                    };
+                    let placement = PLACEMENTS[index].1;
+                    let effect = match flow {
+                        PlacementFlow::Existing { id, cwd } => Effect::Open {
+                            id: id.clone(),
+                            cwd: cwd.clone(),
+                            placement,
+                        },
+                        PlacementFlow::Create { cwd, agent, .. } => Effect::CreatePlaced {
+                            cwd: cwd.clone(),
+                            agent: agent.clone(),
+                            placement,
+                        },
+                    };
                     return Some(effect);
                 }
                 _ => (),
@@ -366,7 +484,38 @@ impl Drop for Signals {
     }
 }
 
+/// Pane placements offered by the floating dashboard, in picker order.
+const PLACEMENTS: [(&str, PanePlacement); 3] = [
+    ("Split right (default)", PanePlacement::Right),
+    ("Split below", PanePlacement::Below),
+    ("New window", PanePlacement::Window),
+];
+
+/// Initial placement picker index from KIRO_AGENTS_WORKSPACE_PLACEMENT.
+fn placement_index(value: &str) -> usize {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "below" => 1,
+        "window" => 2,
+        _ => 0,
+    }
+}
+
+fn default_placement_index() -> usize {
+    placement_index(&std::env::var("KIRO_AGENTS_WORKSPACE_PLACEMENT").unwrap_or_default())
+}
+
 pub fn run(dir: &Path) -> Result<()> {
+    run_board(dir, None)
+}
+
+/// Floating dashboard for the workspace popup. It navigates existing sessions
+/// and places them through the workspace feature; it never attaches a native
+/// PTY inside the popup, so the focused session stays attached elsewhere.
+pub fn run_popup(dir: &Path, navigator: &dyn WorkspaceFeature) -> Result<()> {
+    run_board(dir, Some(navigator))
+}
+
+fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()> {
     let signals = Signals::register()?;
     let mut app = App {
         board: Board::default(),
@@ -374,6 +523,7 @@ pub fn run(dir: &Path) -> Result<()> {
         message: "Loading sessions…".into(),
         scan: None,
         scan_token: 0,
+        popup: navigator.is_some(),
     };
     let mut refresh = Some(refresh_task(dir));
     let mut screen = Screen::open()?;
@@ -388,7 +538,7 @@ pub fn run(dir: &Path) -> Result<()> {
         if dirty {
             screen
                 .terminal
-                .draw(|frame| view::draw(frame, &app.board, &app.mode, &app.message))?;
+                .draw(|frame| view::draw(frame, &app.board, &app.mode, &app.message, app.popup))?;
             dirty = false;
         }
         let effect = if event::poll(Duration::from_millis(40))? {
@@ -438,14 +588,94 @@ pub fn run(dir: &Path) -> Result<()> {
                 refresh = Some(refresh_task(dir));
                 dirty = true;
             }
+            Some(Effect::Focus(id)) => {
+                // Only the floating dashboard produces focus effects.
+                if let Some(navigator) = navigator {
+                    match navigator.focus_session(&id) {
+                        Ok(true) => return Ok(()),
+                        Ok(false) => {
+                            let cwd = app
+                                .board
+                                .rows
+                                .iter()
+                                .find(|row| row.id == id)
+                                .map(|row| row.cwd.clone());
+                            match cwd {
+                                Some(cwd) => {
+                                    app.mode = Mode::Placement {
+                                        flow: PlacementFlow::Existing { id, cwd },
+                                        selected: default_placement_index(),
+                                    };
+                                    app.message.clear();
+                                }
+                                None => {
+                                    app.message =
+                                        "Session is no longer listed; r refreshes the board.".into()
+                                }
+                            }
+                        }
+                        Err(error) => app.message = format!("Workspace focus failed: {error:#}"),
+                    }
+                    dirty = true;
+                }
+            }
+            Some(Effect::Open { id, cwd, placement }) => {
+                if let Some(navigator) = navigator {
+                    match navigator.open_session(&id, Path::new(&cwd), placement) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => {
+                            app.message = format!("Workspace placement failed: {error:#}");
+                        }
+                    }
+                    dirty = true;
+                }
+            }
+            Some(Effect::CreatePlaced {
+                cwd,
+                agent,
+                placement,
+            }) => {
+                if let Some(navigator) = navigator {
+                    app.message = "Starting native Kiro…".into();
+                    screen.terminal.draw(|frame| {
+                        view::draw(frame, &app.board, &app.mode, &app.message, app.popup)
+                    })?;
+                    match host::call(dir, Action::New { cwd, agent }, true) {
+                        Ok(Reply::Created(row)) => {
+                            let created = *row;
+                            app.board.rows.push(created.clone());
+                            app.board.set_query(String::new());
+                            app.board.select_id(&created.id);
+                            app.mode = Mode::Browse;
+                            match navigator.open_session(
+                                &created.id,
+                                Path::new(&created.cwd),
+                                placement,
+                            ) {
+                                Ok(()) => return Ok(()),
+                                Err(error) => {
+                                    app.message = format!(
+                                        "Session created; workspace placement failed: {error:#}"
+                                    )
+                                }
+                            }
+                        }
+                        Ok(_) => app.message = "Unexpected creation response".into(),
+                        Err(error) => app.message = format!("Create failed: {error:#}"),
+                    }
+                    refresh = Some(refresh_task(dir));
+                    last_refresh = Instant::now();
+                    dirty = true;
+                }
+            }
             Some(effect @ (Effect::Attach(_) | Effect::Create { .. })) => {
                 let id = match effect {
                     Effect::Attach(id) => Some(id),
                     Effect::Create { cwd, agent } => {
                         app.message = "Starting native Kiro…".into();
-                        screen
-                            .terminal
-                            .draw(|frame| view::draw(frame, &app.board, &app.mode, &app.message))?;
+                        screen.terminal.draw(|frame| {
+                            view::draw(frame, &app.board, &app.mode, &app.message, app.popup)
+                        })?;
                         match host::call(dir, Action::New { cwd, agent }, true) {
                             Ok(Reply::Created(row)) => {
                                 let id = row.id.clone();
@@ -546,7 +776,14 @@ mod tests {
             message: String::new(),
             scan: None,
             scan_token: 0,
+            popup: false,
         }
+    }
+
+    fn popup_app(state: &str) -> App {
+        let mut app = app(state);
+        app.popup = true;
+        app
     }
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -681,6 +918,147 @@ mod tests {
             app.key(backspace);
             assert!(matches!(&app.mode, Mode::Rename {query, ..} if query.is_empty()));
         }
+    }
+
+    #[test]
+    fn standalone_board_keeps_attach_escape_and_create_effects() {
+        let mut app = app("live");
+        assert!(
+            matches!(app.key(key(KeyCode::Enter)), Some(Effect::Attach(id)) if id == "selected")
+        );
+        app.board.set_query("tmp".into());
+        assert!(app.key(key(KeyCode::Esc)).is_none());
+        assert!(app.board.query.is_empty());
+        assert!(app.key(key(KeyCode::Char('v'))).is_none());
+        assert!(matches!(app.mode, Mode::Browse));
+    }
+
+    #[test]
+    fn popup_enter_focuses_without_attaching_a_native_pty() {
+        let mut app = popup_app("live");
+        assert!(
+            matches!(app.key(key(KeyCode::Enter)), Some(Effect::Focus(id)) if id == "selected")
+        );
+        let mut app = popup_app("exited");
+        assert!(app.key(key(KeyCode::Enter)).is_none());
+        assert!(app.message.contains("Cannot attach"));
+    }
+
+    #[test]
+    fn popup_browse_shortcuts_choose_the_explicit_placement() {
+        for (code, placement) in [
+            (KeyCode::Char('v'), PanePlacement::Right),
+            (KeyCode::Char('h'), PanePlacement::Below),
+            (KeyCode::Char('w'), PanePlacement::Window),
+        ] {
+            let mut app = popup_app("live");
+            assert!(matches!(
+                app.key(key(code)),
+                Some(Effect::Open { id, cwd, placement: chosen })
+                    if id == "selected" && cwd == "/tmp" && chosen == placement
+            ));
+        }
+        let mut app = popup_app("exited");
+        for code in [KeyCode::Char('v'), KeyCode::Char('h'), KeyCode::Char('w')] {
+            assert!(app.key(key(code)).is_none());
+        }
+        assert!(app.message.contains("Only a live session"));
+    }
+
+    #[test]
+    fn popup_escape_closes_the_floating_dashboard() {
+        let mut app = popup_app("live");
+        app.board.set_query("tmp".into());
+        assert!(matches!(app.key(key(KeyCode::Esc)), Some(Effect::Quit)));
+        let mut app = popup_app("live");
+        assert!(matches!(
+            app.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
+            Some(Effect::Quit)
+        ));
+        // Kiro's native Ctrl+G does not become a wrapper dashboard shortcut.
+        let mut app = popup_app("live");
+        app.mode = agent_mode();
+        assert!(app
+            .key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL))
+            .is_none());
+        assert!(matches!(&app.mode, Mode::Agent { .. }));
+    }
+
+    #[test]
+    fn popup_create_shows_placement_before_the_host_call() {
+        let mut app = popup_app("live");
+        app.mode = agent_mode();
+        assert!(app.key(key(KeyCode::Enter)).is_none());
+        assert!(matches!(
+            &app.mode,
+            Mode::Placement { flow: PlacementFlow::Create { agent: Some(agent), .. }, selected: 0 }
+                if agent == "reviewer"
+        ));
+        assert!(matches!(
+            app.key(key(KeyCode::Char('h'))),
+            Some(Effect::CreatePlaced { cwd, agent: Some(agent), placement: PanePlacement::Below })
+                if cwd == "/tmp" && agent == "reviewer"
+        ));
+        assert!(matches!(&app.mode, Mode::Placement { .. }));
+    }
+
+    #[test]
+    fn placement_escape_restores_agent_form_and_confirms_existing_rows() {
+        let mut app = popup_app("live");
+        app.mode = agent_mode();
+        assert!(app.key(key(KeyCode::Enter)).is_none());
+        assert!(app.key(key(KeyCode::Esc)).is_none());
+        assert!(matches!(
+            &app.mode,
+            Mode::Agent { directory, picker }
+                if directory.query == "project-filter" && picker.cwd == "/tmp"
+        ));
+        let existing = || Mode::Placement {
+            flow: PlacementFlow::Existing {
+                id: "selected".into(),
+                cwd: "/tmp".into(),
+            },
+            selected: placement_index("window"),
+        };
+        app.mode = existing();
+        assert!(matches!(
+            app.key(key(KeyCode::Enter)),
+            Some(Effect::Open { id, cwd, placement: PanePlacement::Window })
+                if id == "selected" && cwd == "/tmp"
+        ));
+        app.mode = existing();
+        assert!(app.key(key(KeyCode::Esc)).is_none());
+        assert!(matches!(app.mode, Mode::Browse));
+    }
+
+    #[test]
+    fn placement_arrows_and_environment_default_select_a_pane() {
+        assert_eq!(placement_index("right"), 0);
+        assert_eq!(placement_index("BELOW"), 1);
+        assert_eq!(placement_index(" window "), 2);
+        assert_eq!(placement_index(""), 0);
+        let mut app = popup_app("live");
+        app.mode = Mode::Placement {
+            flow: PlacementFlow::Existing {
+                id: "selected".into(),
+                cwd: "/tmp".into(),
+            },
+            selected: 0,
+        };
+        app.key(key(KeyCode::Down));
+        app.key(key(KeyCode::Down));
+        assert!(matches!(&app.mode, Mode::Placement { selected: 2, .. }));
+        app.key(key(KeyCode::Down));
+        assert!(matches!(&app.mode, Mode::Placement { selected: 2, .. }));
+        app.key(key(KeyCode::Up));
+        assert!(matches!(&app.mode, Mode::Placement { selected: 1, .. }));
+        assert!(matches!(
+            app.key(key(KeyCode::Enter)),
+            Some(Effect::Open {
+                placement: PanePlacement::Below,
+                ..
+            })
+        ));
     }
 
     #[test]

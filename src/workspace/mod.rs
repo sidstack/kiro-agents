@@ -1,4 +1,6 @@
-use crate::features::{SplitDirection, WorkspaceFeature};
+mod navigation;
+
+use crate::features::{PanePlacement, SplitDirection, WorkspaceAttachment, WorkspaceFeature};
 use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
 use std::{
@@ -16,6 +18,7 @@ use std::{
 const MAX_NAME: usize = 64; // tmux rewrites dots and reads punctuation as target syntax.
 const MAX_SOCKET_PATH: usize = 100; // `sockaddr_un` allows 108 bytes including the NUL.
 const CURRENT_PATH: &str = "#{pane_current_path}";
+#[derive(Clone)]
 pub struct TmuxWorkspace {
     state_dir: PathBuf,
     root: PathBuf,
@@ -274,7 +277,6 @@ impl TmuxWorkspace {
     // Pass tmux argv directly. Quoting belongs only to the shell command inside a pane.
     // Focus, resize, zoom, copy mode and detach retain the native default bindings.
     fn configure_server(&self) -> Result<()> {
-        let board = self.pane_command(false)?;
         let shell = self.pane_command(true)?;
         // Primary-screen applications rely on terminal scrollback, not injected
         // editing keys. Tmux owns that buffer inside a workspace. Only forward
@@ -331,9 +333,6 @@ impl TmuxWorkspace {
             "Could not set workspace PageDown handling",
         )?;
         for (key, command, direction, program) in [
-            ("%", "split-window", "-h", &board),
-            ("\"", "split-window", "-v", &board),
-            ("c", "new-window", "-a", &board),
             ("T", "split-window", "-h", &shell),
             ("C", "new-window", "-a", &shell),
         ] {
@@ -352,20 +351,68 @@ impl TmuxWorkspace {
                 "Could not set the workspace key binding",
             )?;
         }
+        // Remove bindings installed by older wrapper frontends on this private
+        // server. Restore tmux's native copy-mode Ctrl+G behavior.
+        self.run(
+            &["unbind-key", "-q", "-T", "root", "C-g"],
+            "Could not remove the legacy dashboard shortcut",
+        )?;
+        self.run(
+            &[
+                "bind-key",
+                "-T",
+                "copy-mode",
+                "C-g",
+                "send-keys",
+                "-X",
+                "clear-selection",
+            ],
+            "Could not restore native copy-mode Ctrl+G",
+        )?;
+        self.run(
+            &["unbind-key", "-q", "-T", "copy-mode-vi", "C-g"],
+            "Could not remove the legacy vi dashboard shortcut",
+        )?;
+        for (table, key, tail) in [
+            ("root", "C-q", vec!["workspace", "dashboard"]),
+            ("copy-mode", "C-q", vec!["workspace", "dashboard"]),
+            ("copy-mode-vi", "C-q", vec!["workspace", "dashboard"]),
+            ("prefix", "g", vec!["workspace", "dashboard"]),
+            ("prefix", "%", vec!["workspace", "split", "--horizontal"]),
+            ("prefix", "\"", vec!["workspace", "split", "--vertical"]),
+            ("prefix", "c", vec!["workspace", "window"]),
+        ] {
+            let command = self.navigation_launcher(&tail)?;
+            self.run(
+                &["bind-key", "-T", table, key, "run-shell", "-b", &command],
+                "Could not bind the floating dashboard",
+            )?;
+        }
+        let command = self.navigation_launcher(&["workspace", "dashboard"])?;
+        let hook = format!("run-shell -b {}", navigation::tmux_quote(&command));
+        self.run(
+            &["set-hook", "-g", "client-attached", &hook],
+            "Could not configure the workspace dashboard",
+        )?;
         Ok(())
     }
     fn start_session(&self, name: &str, cwd: &str) -> Result<()> {
-        let command = self.pane_command(false)?;
+        let command = self.app_command(&["__workspace-home"], &[])?;
         let output = self.output(&[
             "new-session",
             "-d",
             "-s",
             name,
+            "-P",
+            "-F",
+            "#{pane_id}",
             "-c",
             &cwd.replace('#', "##"),
             &command,
         ])?;
         if output.status.success() {
+            let pane = String::from_utf8(output.stdout)?.trim().to_owned();
+            self.mark_empty_home(&pane)?;
             return Ok(());
         }
         Err(anyhow!(
@@ -375,6 +422,18 @@ impl TmuxWorkspace {
     }
 }
 impl WorkspaceFeature for TmuxWorkspace {
+    fn dashboard(&self) -> Result<()> {
+        self.show_dashboard(None)
+    }
+    fn focus_session(&self, id: &str) -> Result<bool> {
+        self.navigate_existing(id)
+    }
+    fn open_session(&self, id: &str, cwd: &Path, placement: PanePlacement) -> Result<()> {
+        self.place_session(id, cwd, placement)
+    }
+    fn register_attachment(&self, id: &str) -> Result<Option<Box<dyn WorkspaceAttachment>>> {
+        self.track_attachment(id)
+    }
     fn open(&self, name: &str, cwd: &Path, detached: bool) -> Result<()> {
         let name = workspace_name(name)?;
         let cwd = directory(cwd)?;
@@ -425,6 +484,12 @@ impl WorkspaceFeature for TmuxWorkspace {
         Ok(())
     }
     fn split(&self, direction: SplitDirection, terminal: bool, cwd: &Path) -> Result<()> {
+        if !terminal {
+            return self.show_dashboard(Some(match direction {
+                SplitDirection::Horizontal => PanePlacement::Right,
+                SplitDirection::Vertical => PanePlacement::Below,
+            }));
+        }
         let cwd = directory(cwd)?;
         self.ensure_runtime()?;
         let (pane, _) = self.owned_pane()?;
@@ -451,6 +516,9 @@ impl WorkspaceFeature for TmuxWorkspace {
         )
     }
     fn window(&self, terminal: bool, cwd: &Path) -> Result<()> {
+        if !terminal {
+            return self.show_dashboard(Some(PanePlacement::Window));
+        }
         let cwd = directory(cwd)?;
         self.ensure_runtime()?;
         let (_, window) = self.owned_pane()?;

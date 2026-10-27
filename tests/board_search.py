@@ -181,7 +181,7 @@ with tempfile.TemporaryDirectory(prefix="kiro-search-test-") as tmp:
         assert b"/design-system:review-bot" in raw, raw[-900:]
         rows = json.loads(run_cli(env, "status", "--json"))
         assert len(rows) == 1 and rows[0]["agent"] == "review-bot", rows
-        board.raw(b"\x07", 0.5)
+        board.raw(b"\x11", 0.5)
         board.absorb()
         board.wait_for("Kiro sessions")
 

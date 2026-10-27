@@ -75,10 +75,11 @@ authoritative billing view.
 `Ctrl+B` is tmux's default prefix. Kiro owns `Ctrl+C/D/G/X/O/R/S/T/U/J/Z`, `Tab`,
 `Shift+Tab`, `Esc`.
 
-**Current choice.** Ctrl+G detaches by explicit user preference, overriding Kiro's
-crew shortcut while attached. Ctrl+B remains available to tmux. Left Arrow always
-passes through; empty-editor detection is deferred rather than guessed from input
-bytes. Shortcut configuration and native editor-state integration are not shipped.
+**Current choice.** Ctrl+Q detaches. It is not listed in Kiro's documented default
+shortcuts or tmux's default key bindings. Ctrl+G remains Kiro's crew shortcut and
+Ctrl+B remains available to tmux. Raw mode disables IXON software flow control;
+terminal-client custom bindings still need manual verification. Left Arrow
+passes through without guessing editor state. Shortcut configuration is not shipped.
 
 ## 9. Secrets and logs
 
@@ -98,7 +99,7 @@ limitation for external editors.
 
 **Mitigation.** P0 tests `!npm run build`, `/editor`, and an interactive prompt under our
 attach path. If `/editor` conflicts with our raw-mode frontend, document it and offer
-explicit detach (Ctrl+G leaves the session running).
+explicit detach (Ctrl+Q leaves the session running).
 
 ## 11. Host as a long-lived privileged process
 

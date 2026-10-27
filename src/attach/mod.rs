@@ -75,9 +75,9 @@ fn poll_pair(first: RawFd, second: RawFd, timeout_ms: i32) -> io::Result<(bool, 
 pub struct Leader {}
 
 impl Leader {
-    // Ctrl+G detaches without conflicting with tmux's Ctrl+B prefix.
+    // Ctrl+Q detaches without conflicting with tmux's Ctrl+B prefix.
     pub fn filter(&mut self, bytes: &[u8]) -> (Vec<u8>, bool) {
-        if let Some(index) = bytes.iter().position(|byte| *byte == 7) {
+        if let Some(index) = bytes.iter().position(|byte| *byte == 17) {
             (bytes[..index].to_vec(), true)
         } else {
             (bytes.to_vec(), false)
@@ -205,7 +205,11 @@ fn handoff(
     let (mut cols, mut rows) = crossterm::terminal::size()?;
     protocol::send(
         &mut stream,
-        &protocol::request(Action::Attach { id, cols, rows }),
+        &protocol::request(Action::Attach {
+            id: id.clone(),
+            cols,
+            rows,
+        }),
     )?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let ack = protocol::receive(&mut reader);
@@ -228,6 +232,22 @@ fn handoff(
         }
         Err(error) => return Err(error.into()),
     }
+    let _workspace_attachment = match crate::workspace_context() {
+        Ok(Some(feature)) => match feature.register_attachment(&id) {
+            Ok(registration) => registration,
+            Err(_) => {
+                tracing::warn!(
+                    "Workspace pane association unavailable; native attachment continues"
+                );
+                None
+            }
+        },
+        Ok(None) => None,
+        Err(_) => {
+            tracing::warn!("Workspace context unavailable; native attachment continues");
+            None
+        }
+    };
     let mut signals = Vec::new();
     for signal in [libc::SIGTERM, libc::SIGHUP, libc::SIGINT] {
         signals.push(signal_hook::flag::register(signal, interrupted.clone())?);

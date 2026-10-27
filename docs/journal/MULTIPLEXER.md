@@ -55,11 +55,9 @@ Next batch (planning only): see [backlog](../BACKLOG.md) for verified V2/V3 nati
 store resume and fuzzy/full-text conversation quick-open. Keep that work out of the
 initial multiplexer implementation.
 
-Shortcut follow-up: user selected a direct Ctrl+G return to the board so tmux can
-retain Ctrl+B d for workspace detach. Empty-editor Left Arrow was explicitly deferred;
-Pi has getEditorText(), but this native passthrough does not have an equivalent input
-state signal. Arrow bytes stay unchanged. Ctrl+G now supersedes Kiro's crew shortcut
-while attached.
+Shortcut follow-up: Ctrl+Q alone opens the dashboard. Preserve Kiro's Ctrl+G crew
+monitor and tmux's Ctrl+B prefix. Left Arrow passes through without inferring an
+empty editor from byte traffic. The earlier Ctrl+G choice was withdrawn.
 
 Incident/naming follow-up: corrected closed-PTY input spinning and verified that
 closed tmux panes leave no live frontends. A bounded lifecycle/CPU regression also
@@ -86,3 +84,20 @@ MobaXterm SSH acceptance: user confirmed PageUp/PageDown and then Shift+MouseWhe
 scrolling work. Ordinary wheel events arrive as prompt-history arrows; keep native
 Up/Down unchanged and document the verified Shift modifier. This is a client-specific
 workaround, not a claim that ordinary wheel scrolling is fixed for every terminal.
+
+## Floating dashboard and single-chord navigation
+
+- Ctrl+Q opens a centered popup without detaching Kiro; Escape/Ctrl+Q dismiss it.
+- Enter focuses a mapped session's existing pane/window; v/h/w place an inactive
+  live session right, below or in a new window. Ctrl+N selects placement before
+  creating a child. Only the initial empty launcher slot may be reused.
+- Frontends register pane ownership only after host attach ACK. PID start time,
+  executable inode and foreground process ancestry reject stale mappings. Closing
+  a frontend clears only its own registration; externally attached sessions are
+  never stolen. Older frontends need one explicit frontend reattach, not a host restart.
+- Private server setup removes the superseded Ctrl+G wrapper binding and preserves
+  native Kiro Ctrl+G and tmux Ctrl+B. No user tmux server/configuration is modified.
+- Real-client PTY coverage verifies popup placement, no extra dashboard tile,
+  cross-window focus with stable Kiro PIDs, and legacy shortcut cleanup. The broad
+  workspace suite retains viewport scrolling, native mouse/page/arrow passthrough,
+  shells, prefix keys, zoom/resize, frontend exit and foreign-server isolation.

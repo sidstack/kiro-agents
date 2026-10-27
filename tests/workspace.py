@@ -14,6 +14,7 @@ import sys
 import tempfile
 import termios
 import time
+from workspace_dashboard import popup_pid
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / 'target/debug/kiro-agents'
@@ -121,12 +122,18 @@ def main():
             value = tmux('display-message', '-p', '-t', pane, '#{socket_path},#{pid},0', path=path).strip()
             return dict(env, TMUX=value, TMUX_PANE=pane, KIRO_AGENTS_WORKSPACE_SOCKET=str(socket))
 
-        def attach(pane, identifier):
-            tmux('send-keys', '-t', pane, '/')
-            tmux('send-keys', '-t', pane, '-l', identifier)
-            tmux('send-keys', '-t', pane, 'Enter')
-            tmux('send-keys', '-t', pane, 'Enter')
-            wait(lambda: 'READY:' in capture(pane), f'{pane} did not attach')
+        def popup():
+            drain()
+            return popup_pid(tmux('display-message', '-p', '#{pid}').strip(), binary)
+
+        def pick(identifier, placement=b'v'):
+            wait(popup, 'dashboard popup did not open')
+            press(b'/')
+            press(identifier.encode())
+            press(b'\r')
+            press(placement)
+            wait(lambda: popup() is None, 'dashboard popup did not close')
+            return wait(lambda: next((line.split('\t')[0] for line in tmux('list-panes', '-a', '-F', '#{pane_id}\t#{@kiro-agents-session}').splitlines() if line.endswith('\t' + identifier)), None), 'selected session did not attach')
 
         try:
             disabled = dict(env, KIRO_AGENTS_WORKSPACES='off', KIRO_AGENTS_HOME=str(root / 'disabled'))
@@ -144,30 +151,31 @@ def main():
             cli('new', str(project), '--agent', 'planner', '--no-attach')
             rows = json.loads(cli('status', '--json'))
             assert len(rows) == 2
+            for agent in ['extra-right', 'extra-below']:
+                cli('new', str(project), '--agent', agent, '--no-attach')
+            rows = json.loads(cli('status', '--json'))
+            assert len(rows) == 4
             original_pids = {row['id']: row['pid'] for row in rows}
             cli('workspace', 'open', 'test', '--dir', str(project), '--detach')
             assert 'test' in cli('workspace', 'list')
             first = panes()[0]
             tmux('resize-window', '-t', 'test', '-x', '220', '-y', '45')
-            wait(lambda: 'Kiro sessions' in capture(first), 'initial pane did not open board')
             actual_cwd = pane_cwd(first)
             assert actual_cwd == str(project), (actual_cwd, str(project))
             own = context(first)
-            cli('workspace', 'split', '--horizontal', '--dir', str(project), context=own)
-            second = next(pane for pane in panes() if pane != first)
-            wait(lambda: 'Kiro sessions' in capture(second), 'split did not open board')
-            attach(first, rows[0]['id'])
-            attach(second, rows[1]['id'])
-            tmux('send-keys', '-t', first, '-l', 'h')
-            wait(lambda: 'BYTES:68' in ''.join(capture(first).split()), 'raw input was not forwarded')
-            # A real attached tmux client exercises prefix parsing, not send-keys
-            # (which writes directly to a pane and bypasses the tmux prefix).
+            # A real attached client runs the prefix parser and owns the popup.
             client, master = os.forkpty()
             if client == 0:
                 fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', 45, 220, 0, 0))
                 os.chdir(project)
                 os.execve(str(binary), [str(binary), 'workspace', 'open', 'test'], env)
             wait(lambda: tmux('list-clients', '-F', '#{client_pid}').strip(), 'tmux client did not attach')
+            assert pick(rows[0]['id']) == first
+            press(b'\x11')
+            second = pick(rows[1]['id'])
+            assert second != first
+            tmux('send-keys', '-t', first, '-l', 'h')
+            wait(lambda: 'BYTES:68' in ''.join(capture(first).split()), 'raw input was not forwarded')
             cli('workspace', 'open', 'alternate', '--dir', str(project), '--detach')
             alternate = tmux('list-panes', '-t', 'alternate', '-F', '#{pane_id}').strip()
             cli('workspace', 'open', 'alternate', context=own)
@@ -241,21 +249,20 @@ def main():
             tmux('resize-pane', '-t', first, '-x', '90')
             size = tmux('display-message', '-p', '-t', first, '#{pane_width}x#{pane_height}').strip()
             wait(lambda: f'SIZE:{size}' in capture(first), 'exact resize did not reach fake Kiro')
-            press(b'\x07')
-            wait(lambda: 'Kiro sessions' in capture(first), 'Ctrl+G did not detach inner session')
-            assert tmux('list-clients', '-F', '#{client_pid}').strip(), 'inner detach also detached workspace'
-            press(b'\r')
-            wait(lambda: 'READY:' in capture(first), 'inner session did not reattach')
-            # Exercise configured keys with an attached client; quoting must
-            # also survive tmux's stored binding parser and format expansion.
+            press(b'\x11')
+            wait(popup, 'Ctrl+Q did not open dashboard')
+            assert tmux('list-clients', '-F', '#{client_pid}').strip(), 'dashboard detached workspace'
+            press(b'\x1b')
+            wait(lambda: popup() is None, 'Escape did not dismiss dashboard')
+            # Prefix split shortcuts show a popup before creating a pane.
             press(b'\x02%')
-            wait(lambda: len(panes()) == 3, 'prefix % did not split')
-            extra = next(pane for pane in panes() if pane not in [first, second])
-            wait(lambda: 'Kiro sessions' in capture(extra), 'key split did not open board')
-            assert pane_cwd(extra) == str(project)
+            wait(popup, 'prefix % did not open placement dashboard')
+            assert len(panes()) == 2
+            extra = pick(rows[2]['id'])
+            assert len(panes()) == 3 and pane_cwd(extra) == str(project)
             press(b'\x02x')
             press(b'y')
-            wait(lambda: len(panes()) == 2, 'prefix x confirmation did not close picker pane')
+            wait(lambda: len(panes()) == 2, 'prefix x confirmation did not close session pane')
             tmux('select-pane', '-t', first)
             press(b'\x02\x1b[C')
             wait(lambda: tmux('display-message', '-p', '#{pane_id}').strip() != first, 'prefix arrow did not change focus')
@@ -272,10 +279,11 @@ def main():
             press(b'q')
             wait(lambda: tmux('display-message', '-p', '-t', first, '#{pane_in_mode}').strip() == '0', 'copy mode did not close')
             press(b'\x02"')
-            wait(lambda: len(panes()) == 3, 'prefix quote did not split vertically')
-            extra = next(pane for pane in panes() if pane not in [first, second])
-            wait(lambda: 'Kiro sessions' in capture(extra), 'vertical key split did not open board')
-            assert pane_cwd(extra) == str(project)
+            wait(popup, 'prefix quote did not open placement dashboard')
+            assert len(panes()) == 2
+            extra = pick(rows[3]['id'], b'h')
+            assert len(panes()) == 3 and pane_cwd(extra) == str(project)
+            assert int(tmux('display-message', '-p', '-t', extra, '#{pane_top}')) > int(tmux('display-message', '-p', '-t', first, '#{pane_top}'))
             tmux('kill-pane', '-t', extra)
             tmux('select-pane', '-t', first)
             press(b'\x02T')
@@ -291,9 +299,9 @@ def main():
             wait(lambda: 'SHELL_PANE_READY' in capture(terminal), 'shell pane unavailable')
             tmux('select-pane', '-t', first)
             press(b'\x02c')
-            wait(lambda: len(tmux('list-windows', '-t', 'test', '-F', '#{window_id}').splitlines()) == 2, 'prefix c did not open window')
-            extra = tmux('display-message', '-p', '#{pane_id}').strip()
-            wait(lambda: 'Kiro sessions' in capture(extra), 'key window did not open board')
+            wait(popup, 'prefix c did not open placement dashboard')
+            extra = pick(rows[2]['id'], b'w')
+            assert len(tmux('list-windows', '-t', 'test', '-F', '#{window_id}').splitlines()) == 2
             assert pane_cwd(extra) == str(project)
             press(b'\x02C')
             wait(lambda: len(tmux('list-windows', '-t', 'test', '-F', '#{window_id}').splitlines()) == 3, 'prefix C did not open shell window')
@@ -307,8 +315,6 @@ def main():
             cli('workspace', 'window', '--terminal', '--dir', str(project), context=own)
             assert len(tmux('list-windows', '-t', 'test', '-F', '#{window_id}').splitlines()) == 4
             tmux('select-window', '-t', 'test:0')
-            tmux('send-keys', '-t', first, 'C-g')
-            wait(lambda: 'Kiro sessions' in capture(first), 'session detach did not return to board')
             panes()  # register every private pane before testing closure
             second_pid = int(tmux('display-message', '-p', '-t', second, '#{pane_pid}'))
             second_start = pane_processes[second_pid]
@@ -330,7 +336,7 @@ def main():
             cli('workspace', 'close', 'test')
             for row in json.loads(cli('status', '--json')):
                 assert row['state'] == 'live' and row['pid'] == original_pids[row['id']]
-            print('PASS: isolated tmux boards, two live sessions, splits/windows, shell panes, zoom/resize, close survival, foreign-server refusal and feature-off')
+            print('PASS: isolated tmux popup, live sessions, splits/windows, shell panes, zoom/resize, close survival, foreign-server refusal and feature-off')
         finally:
             if client is not None:
                 os.kill(client, signal.SIGKILL)

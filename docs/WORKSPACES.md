@@ -22,8 +22,13 @@ installer does not install system dependencies. `KIRO_AGENTS_TMUX_BIN` can selec
 an explicit tmux executable. Workspace sockets need a short absolute state path
 (at most 100 bytes including `/workspaces/tmux.sock`); errors explain the limit.
 
-Each new Kiro pane opens a board to choose or create its own session. A managed Kiro
-session can have one attached frontend; an existing attachment is never stolen.
+Ctrl+Q opens a centered floating dashboard over the current pane. Esc or Ctrl+Q
+closes it without detaching Kiro. Enter on a session already attached in this
+private workspace server focuses its pane/window. An inactive live session opens
+a placement chooser: v splits right, h splits below, and w opens a new window.
+Ctrl+N chooses directory and agent, then placement before starting a session.
+The first session fills the empty launcher slot; later sessions never replace an
+active Kiro or shell pane. An external attachment is never stolen.
 To mix in plain shells, use the terminal shortcuts or these commands from a pane in
 an owned workspace:
 
@@ -37,24 +42,22 @@ Press Ctrl+B, release it, then the following key:
 
 | Key | Action |
 | --- | --- |
-| % | Split left/right; new pane opens the Kiro board |
-| " | Split top/bottom; new pane opens the Kiro board |
+| % | Open dashboard with right-split placement |
+| " | Open dashboard with below-split placement |
 | Arrow | Focus a pane |
 | Ctrl+Arrow | Resize a pane |
 | z | Zoom/unzoom the selected pane |
 | x | Confirm closing a pane |
-| c | New window with a Kiro board |
+| c | Open dashboard with new-window placement |
 | n / p | Next/previous window |
 | [ | Tmux scrollback/copy mode |
 | d | Detach this workspace |
 | T | New plain shell pane |
 | C | New plain shell window |
 
-Press **Ctrl+G** to detach Kiro and return that pane to its dashboard. Press
-**Ctrl+B then d** to detach the entire workspace. While attached, Ctrl+G is reserved
-for dashboard navigation instead of Kiro's native crew monitor. Left Arrow passes
-through unchanged, including when the native editor is empty. Zoom only changes
-presentation, never session ownership.
+Press **Ctrl+Q** alone to open the dashboard. Press **Ctrl+B then d** to detach
+the entire workspace. Kiro's native Ctrl+G crew monitor and Left Arrow pass
+through unchanged. Zoom only changes presentation, never session ownership.
 
 Mouse wheel up/down scrolls the hovered pane's retained terminal output. For
 primary-screen Kiro, PageUp enters tmux scrollback and PageDown moves toward the
@@ -71,12 +74,13 @@ use the existing board stop action or kiro-agents stop explicitly.
 
 This feature is available on its branch for beta testing. Existing managed sessions
 remain in the same host and registry; select them in any pane without migrating state
-or restarting the host. Detach an existing frontend before attaching that session in
-another pane. Workspaces do not resume stopped historical sessions.
+or restarting the host. Sessions attached by older frontends have no pane-navigation metadata. Detach
+that frontend once and reattach using the updated binary; no host restart is
+required. Existing mapped sessions can be selected directly in the popup. Workspaces do not resume stopped historical sessions.
 
 Unit/behavioral tests use private temporary sockets, fake Kiro and temporary
 HOME/XDG/Kiro paths. A real tmux client in a PTY exercises split/window/shell bindings,
-focus, zoom, close confirmation, Ctrl+G inner detach and workspace detach.
+focus, zoom, close confirmation, Ctrl+Q popup navigation and workspace detach.
 The same suite runs against the extracted optimized beta binary in branch CI.
 Authenticated Kiro and browser/Guacamole visual acceptance remain manual checks.
 

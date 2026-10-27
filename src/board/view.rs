@@ -1,4 +1,4 @@
-use super::{model::Board, picker::AgentStatus, Mode};
+use super::{model::Board, picker::AgentStatus, Mode, PlacementFlow, PLACEMENTS};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -9,7 +9,7 @@ use ratatui::{
 
 const ACCENT: Color = Color::Cyan;
 
-pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str) {
+pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str, popup: bool) {
     let area = frame.area();
     if area.width < 35 || area.height < 12 {
         frame.render_widget(
@@ -41,7 +41,11 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
                 board.query
             )),
         ]))
-        .block(Block::bordered().title(format!("Kiro sessions · v{}", env!("CARGO_PKG_VERSION")))),
+        .block(Block::bordered().title(format!(
+            "Kiro sessions{} · v{}",
+            if popup { " · floating" } else { "" },
+            env!("CARGO_PKG_VERSION")
+        ))),
         areas[0],
     );
     let visible = board.visible_indices();
@@ -96,7 +100,11 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
         _ => board.selected().map_or_else(
             || "No matching sessions. Ctrl+N creates a fresh session.".into(),
             |row| if row.state == "live" {
-                format!("{}\nEnter attaches · Ctrl+G returns here", row.cwd)
+                if popup {
+                    format!("{}\nEnter focuses this session · v split right · h split below · w new window", row.cwd)
+                } else {
+                    format!("{}\nEnter attaches · Ctrl+Q returns here", row.cwd)
+                }
             } else {
                 format!("Cannot attach: session is {} (exit {}). Use Kiro history manually or Ctrl+N for a fresh session.\n{}",
                     row.state, row.exit_code.map_or_else(|| "unknown".into(), |code| code.to_string()), row.notice.as_deref().unwrap_or(""))
@@ -104,10 +112,21 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
         ),
     };
     frame.render_widget(Paragraph::new(details).wrap(Wrap { trim: false }), areas[2]);
+    let (select_line, actions_line) = if popup {
+        (
+            "↑/↓ j/k select · Enter focus · v split right · h split below · w new window",
+            "Ctrl+N new · F2 rename · Ctrl+K stop · / search · r refresh · Esc closes popup",
+        )
+    } else {
+        (
+            "↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh",
+            "Ctrl+N create · F2 rename · Ctrl+K stop · q/Ctrl+Q quit",
+        )
+    };
     frame.render_widget(
         Paragraph::new(vec![
-            Line::raw("↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh"),
-            Line::raw("Ctrl+N create · F2 rename · Ctrl+K stop · q/Ctrl+Q quit"),
+            Line::raw(select_line),
+            Line::raw(actions_line),
             Line::styled(message, Style::default().fg(Color::Yellow)),
         ]),
         areas[3],
@@ -115,7 +134,11 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
 
     if matches!(
         mode,
-        Mode::Directory(_) | Mode::Agent { .. } | Mode::Stop(_) | Mode::Rename { .. }
+        Mode::Directory(_)
+            | Mode::Agent { .. }
+            | Mode::Stop(_)
+            | Mode::Rename { .. }
+            | Mode::Placement { .. }
     ) {
         frame.render_widget(Clear, area);
         frame.render_widget(
@@ -125,13 +148,14 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
     }
     match mode {
         Mode::Directory(picker) => {
-            let popup = modal(frame, "New session: directory · 1/2");
+            let steps = if popup { "1/3" } else { "1/2" };
+            let area = modal(frame, &format!("New session: directory · {steps}"));
             let parts = Layout::vertical([
                 Constraint::Length(3),
                 Constraint::Min(1),
                 Constraint::Length(4),
             ])
-            .split(popup);
+            .split(area);
             frame.render_widget(
                 Paragraph::new(format!(
                     "Browse: {}\nSearch or path: {}",
@@ -170,13 +194,14 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
             );
         }
         Mode::Agent { picker, .. } => {
-            let popup = modal(frame, "New session: agent (optional) · 2/2");
+            let steps = if popup { "2/3" } else { "2/2" };
+            let area = modal(frame, &format!("New session: agent (optional) · {steps}"));
             let parts = Layout::vertical([
                 Constraint::Length(3),
                 Constraint::Min(1),
                 Constraint::Length(4),
             ])
-            .split(popup);
+            .split(area);
             frame.render_widget(
                 Paragraph::new(format!(
                     "Directory: {}\nFilter: {}",
@@ -228,22 +253,64 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
                 parts[2],
             );
         }
+        Mode::Placement { flow, selected } => {
+            let (title, context) = match flow {
+                PlacementFlow::Existing { id, cwd } => (
+                    "Place session in the workspace",
+                    format!("{id}\nDirectory: {cwd}"),
+                ),
+                PlacementFlow::Create { cwd, agent, .. } => (
+                    "New session: placement · 3/3",
+                    format!(
+                        "Directory: {cwd}\nAgent: {}",
+                        agent.as_deref().unwrap_or("Kiro default")
+                    ),
+                ),
+            };
+            let area = modal(frame, title);
+            let parts = Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Min(1),
+                Constraint::Length(4),
+            ])
+            .split(area);
+            frame.render_widget(Paragraph::new(context).wrap(Wrap { trim: false }), parts[0]);
+            let items = PLACEMENTS
+                .iter()
+                .map(|(label, _)| ListItem::new(*label))
+                .collect::<Vec<_>>();
+            let mut state = ListState::default().with_selected(Some(*selected));
+            frame.render_stateful_widget(choice_list(items), parts[1], &mut state);
+            let notice = if message.is_empty() {
+                "The chosen pane receives the session; no active pane or shell is replaced."
+            } else {
+                message
+            };
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::raw("↑/↓ choose · Enter confirms · v right · h below · w window"),
+                    Line::raw("Esc goes back without creating"),
+                    Line::styled(notice, Style::default().fg(Color::Yellow)),
+                ])
+                .wrap(Wrap { trim: false }),
+                parts[2],
+            );
+        }
         Mode::Rename { id, query } => {
-            let popup = modal(frame, "Name session");
+            let area = modal(frame, "Name session");
             frame.render_widget(
                 Paragraph::new(format!("{id}\nName: {query}\n\nEnter saves · empty name restores automatic title\nCtrl+U clears · Esc cancels\n{message}"))
-                    .wrap(Wrap { trim: false }), popup);
-            input_cursor(frame, popup, "Name: ", query, 1);
-            input_cursor(frame, popup, "Name: ", query, 1);
+                    .wrap(Wrap { trim: false }), area);
+            input_cursor(frame, area, "Name: ", query, 1);
         }
         Mode::Stop(id) => {
-            let popup = modal(frame, "Stop session? y/n");
+            let area = modal(frame, "Stop session? y/n");
             frame.render_widget(
                 Paragraph::new(format!(
                     "{id}\nStops only this owned session.\ny confirms · n/Esc cancels"
                 ))
                 .wrap(Wrap { trim: false }),
-                popup,
+                area,
             );
         }
         _ => (),
@@ -292,9 +359,11 @@ mod tests {
     use crate::protocol::SessionInfo;
     use ratatui::{backend::TestBackend, Terminal};
 
-    fn render(board: &Board, mode: &Mode, width: u16, height: u16) -> String {
+    fn render(board: &Board, mode: &Mode, width: u16, height: u16, popup: bool) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal.draw(|frame| draw(frame, board, mode, "")).unwrap();
+        terminal
+            .draw(|frame| draw(frame, board, mode, "", popup))
+            .unwrap();
         let buffer = terminal.backend().buffer();
         (0..height)
             .map(|y| {
@@ -327,7 +396,7 @@ mod tests {
     #[test]
     fn board_rendering() {
         let mut board = Board::default();
-        insta::assert_snapshot!("empty", render(&board, &Mode::Browse, 100, 20));
+        insta::assert_snapshot!("empty", render(&board, &Mode::Browse, 100, 20, false));
         board.replace_rows(vec![SessionInfo {
             name: None,
             title: None,
@@ -341,14 +410,14 @@ mod tests {
             exit_code: None,
             notice: None,
         }]);
-        insta::assert_snapshot!("live", render(&board, &Mode::Browse, 100, 20));
+        insta::assert_snapshot!("live", render(&board, &Mode::Browse, 100, 20, false));
         board.rows[0].state = "exited".into();
         board.rows[0].exit_code = Some(0);
         board.toggle_filter();
-        insta::assert_snapshot!("history", render(&board, &Mode::Browse, 100, 20));
+        insta::assert_snapshot!("history", render(&board, &Mode::Browse, 100, 20, false));
         insta::assert_snapshot!(
             "create",
-            render(&board, &Mode::Directory(directory()), 100, 20)
+            render(&board, &Mode::Directory(directory()), 100, 20, false)
         );
         let picker = AgentPicker {
             cwd: "/work/project".into(),
@@ -369,19 +438,77 @@ mod tests {
                     picker
                 },
                 100,
-                20
+                20,
+                false
             )
         );
         insta::assert_snapshot!(
             "stop",
-            render(&board, &Mode::Stop("session-one".into()), 100, 20)
+            render(&board, &Mode::Stop("session-one".into()), 100, 20, false)
         );
+    }
+
+    #[test]
+    fn floating_dashboard_and_placement_picker_render() {
+        let mut board = Board::default();
+        board.replace_rows(vec![SessionInfo {
+            name: None,
+            title: None,
+            title_source: None,
+            id: "session-one".into(),
+            cwd: "/work/project".into(),
+            agent: Some("reviewer".into()),
+            generation: "v2".into(),
+            pid: Some(42),
+            state: "live".into(),
+            exit_code: None,
+            notice: None,
+        }]);
+        insta::assert_snapshot!("floating", render(&board, &Mode::Browse, 100, 20, true));
+        let create = Mode::Placement {
+            flow: PlacementFlow::Create {
+                cwd: "/work/project".into(),
+                agent: Some("reviewer".into()),
+                directory: directory(),
+                picker: Box::new(AgentPicker {
+                    cwd: "/work/project".into(),
+                    query: String::new(),
+                    names: vec!["reviewer".into()],
+                    options: vec![None, Some("reviewer".into())],
+                    selected: 1,
+                    status: AgentStatus::Ready,
+                    token: 1,
+                    truncated: false,
+                }),
+            },
+            selected: 0,
+        };
+        insta::assert_snapshot!("placement-create", render(&board, &create, 100, 20, true));
+        let existing = Mode::Placement {
+            flow: PlacementFlow::Existing {
+                id: "session-one".into(),
+                cwd: "/work/project".into(),
+            },
+            selected: 2,
+        };
+        insta::assert_snapshot!(
+            "placement-existing",
+            render(&board, &existing, 100, 20, true)
+        );
+        let small = Mode::Placement {
+            flow: PlacementFlow::Existing {
+                id: "session-one".into(),
+                cwd: "/work/project".into(),
+            },
+            selected: 0,
+        };
+        assert!(render(&board, &small, 60, 15, true).contains("Split right"));
     }
 
     #[test]
     fn tiny_terminal_and_scrolling_picker_render_without_panic() {
         let board = Board::default();
-        assert!(render(&board, &Mode::Browse, 20, 5).contains("Kiro sessions"));
+        assert!(render(&board, &Mode::Browse, 20, 5, false).contains("Kiro sessions"));
         let mut picker = directory();
         picker.candidates = (0..40)
             .map(|n| super::super::picker::Candidate {
@@ -390,6 +517,6 @@ mod tests {
             })
             .collect();
         picker.selected = 39;
-        assert!(render(&board, &Mode::Directory(picker), 70, 15).contains("project-39"));
+        assert!(render(&board, &Mode::Directory(picker), 70, 15, false).contains("project-39"));
     }
 }
