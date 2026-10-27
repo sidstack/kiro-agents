@@ -86,3 +86,7 @@ input. SGR and legacy mouse-report tests pass; some clients may substitute ordin
 arrow keys instead of mouse events. Those are indistinguishable from intentional
 prompt-history keys, so the application must not guess and intercept them. See
 the MobaXterm investigation in [findings](FINDINGS.md) and the optional input probe.
+Run `python3 probes/scroll_input.py` in an ordinary SSH shell to capture original
+client input. For comparison, run it with `--inside-tmux` in a plain shell pane to
+capture what tmux forwards. Do not run it in a Kiro prompt. The two capture points
+answer different questions; forwarded arrows cannot reveal their original source.

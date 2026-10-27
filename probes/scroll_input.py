@@ -68,11 +68,14 @@ def write(text):
     os.write(1, text.encode().replace(b'\n', b'\r\n'))
 
 
-def run(seconds):
+def run(seconds, inside_tmux=False):
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise SystemExit('Run this in an ordinary interactive MobaXterm SSH shell.')
-    if os.environ.get('TMUX'):
-        raise SystemExit('Run outside tmux, in a separate ordinary SSH shell; keep Kiro sessions running.')
+    in_tmux = bool(os.environ.get('TMUX'))
+    if in_tmux and not inside_tmux:
+        raise SystemExit('Use --inside-tmux in a plain shell pane to test forwarded input, or run outside tmux to test the original client input.')
+    if inside_tmux and not in_tmux:
+        raise SystemExit('--inside-tmux requires a plain shell pane inside tmux.')
     saved = termios.tcgetattr(0)
     counts = [Counter(), Counter()]
     phase = 0
@@ -118,6 +121,7 @@ def run(seconds):
             for sig, handler in handlers.items():
                 signal.signal(sig, handler)
     print('Recognized control events only; no typed text or files were recorded.')
+    print('Capture point: ' + ('inside tmux (forwarded input)' if in_tmux else 'outside tmux (original client input)'))
     for label, count in zip(('normal', 'alternate+mouse'), counts):
         print(label + ': ' + (', '.join(f'{key}={value}' for key, value in sorted(count.items())) or 'no input events'))
 
@@ -126,6 +130,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--seconds', type=int, default=45)
     parser.add_argument('--self-test', action='store_true')
+    parser.add_argument('--inside-tmux', action='store_true',
+                        help='test forwarded input in a plain shell pane instead of original SSH client input')
     args = parser.parse_args()
     if args.self_test:
         assert classify(b'\x1b[<64;10;5M')[1] == ['SGR-wheel-up']
@@ -137,7 +143,7 @@ def main():
     else:
         if not 5 <= args.seconds <= 60:
             parser.error('--seconds must be between 5 and 60')
-        run(args.seconds)
+        run(args.seconds, args.inside_tmux)
 
 
 if __name__ == '__main__':
