@@ -166,3 +166,10 @@ not an RPC requirement or a reason to restart live hosts. Status enrichment must
 pre-naming hosts. Keep the actual v0.2.0 compatibility regression (synthetic old peer in
 CI), unique unnamed-session labels, and version-independent rendering snapshots. Do not
 claim automatic SQLite TUI titles until ownership mapping is verified; do not guess by cwd.
+
+Frontend lifecycle: keep Crossterm's use-dev-tty backend and explicit terminal-hangup
+exit checks; its mio backend can spin inside poll after PTY EOF/EIO. Tests must prove
+closed terminal frontends exit. The bounded CPU/PTY/host EOF regression runs in make
+check and against extracted betas. Native title ownership may use a bounded,
+start-time-checked descendant parent chain; main-thread children lists alone miss
+Kiro's runtime-thread launcher chain. See docs/INCIDENT-2026-10-26-CPU.md.

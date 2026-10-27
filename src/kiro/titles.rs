@@ -1,4 +1,4 @@
-//! Best-effort native names, matched to an owned PID rather than directory recency.
+//! Native names matched to an owned process tree, never directory recency.
 use crate::{
     features::{clean_title, SessionFeature, SessionTitle},
     protocol::SessionInfo,
@@ -8,12 +8,14 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
+    sync::OnceLock,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 const MAX_FILES: usize = 10_000;
 const MAX_JSON: u64 = 64 * 1024;
 const MAX_RECORD: usize = 16 * 1024;
+const MAX_ANCESTORS: usize = 12;
 
 pub struct NativeNames {
     directory: PathBuf,
@@ -29,7 +31,7 @@ impl NativeNames {
     }
 
     fn lookup(&self, session: &SessionInfo, started: SystemTime) -> Option<SessionTitle> {
-        let pid = session.pid?;
+        let root_pid = session.pid?;
         let mut matches = Vec::new();
         let mut entries = fs::read_dir(&self.directory).ok()?;
         for entry in entries.by_ref().take(MAX_FILES) {
@@ -50,7 +52,17 @@ impl NativeNames {
             let Some(lock) = read_json(&path) else {
                 continue;
             };
-            if lock.get("pid").and_then(Value::as_u64) != Some(u64::from(pid)) {
+            let Some(pid) = lock
+                .get("pid")
+                .and_then(Value::as_u64)
+                .and_then(|pid| u32::try_from(pid).ok())
+            else {
+                continue;
+            };
+            let Some(native_start) = owned_process_start(root_pid, pid, started) else {
+                continue;
+            };
+            if modified < native_start {
                 continue;
             }
             let Some(meta) = read_json(&path.with_extension("json")) else {
@@ -121,7 +133,55 @@ fn read_json(path: &Path) -> Option<Value> {
 }
 
 // The clock gate excludes abandoned locks from an earlier incarnation of this PID.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ProcessIdentity {
+    parent: u32,
+    started: SystemTime,
+}
+
+// Walk upward from the lock owner: children spawned on runtime threads are absent
+// from /proc/<root>/task/<root>/children. Never adopt a process by cwd or recency.
+fn owned_process_start(root: u32, native: u32, root_start: SystemTime) -> Option<SystemTime> {
+    owned_process_start_using(root, native, root_start, process_identity)
+}
+
+fn owned_process_start_using(
+    root: u32,
+    native: u32,
+    root_start: SystemTime,
+    read: impl Fn(u32) -> Option<ProcessIdentity>,
+) -> Option<SystemTime> {
+    let identity = read(native)?;
+    let mut pid = native;
+    let mut child_start = identity.started;
+    for _ in 0..MAX_ANCESTORS {
+        let current = read(pid)?;
+        if current.started < root_start || current.started > child_start {
+            return None;
+        }
+        if pid == root {
+            // Recheck identities before trusting a chain that could have exited,
+            // reparented or reused a PID while /proc was being traversed.
+            if current.started != root_start || read(root)? != current || read(native)? != identity
+            {
+                return None;
+            }
+            return Some(identity.started);
+        }
+        if current.parent == 0 || current.parent == pid {
+            return None;
+        }
+        child_start = current.started;
+        pid = current.parent;
+    }
+    None
+}
+
 fn process_started(pid: u32) -> Option<SystemTime> {
+    Some(process_identity(pid)?.started)
+}
+
+fn process_identity(pid: u32) -> Option<ProcessIdentity> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let fields = stat
         .rsplit_once(')')?
@@ -129,22 +189,34 @@ fn process_started(pid: u32) -> Option<SystemTime> {
         .split_whitespace()
         .collect::<Vec<_>>();
     let ticks: u64 = fields.get(19)?.parse().ok()?;
+    let parent = fields.get(1)?.parse().ok()?;
+    let &(boot, hz) = process_clock()?;
+    let started = UNIX_EPOCH
+        .checked_add(Duration::from_secs(boot + ticks / hz))?
+        .checked_add(Duration::from_nanos((ticks % hz) * 1_000_000_000 / hz))?;
+    Some(ProcessIdentity { parent, started })
+}
+
+fn process_clock() -> Option<&'static (u64, u64)> {
+    // These values belong to this boot, not to individual processes. Avoid
+    // rereading every CPU's /proc/stat counters at each ancestor/refresh.
+    static CLOCK: OnceLock<(u64, u64)> = OnceLock::new();
+    if let Some(clock) = CLOCK.get() {
+        return Some(clock);
+    }
     // SAFETY: querying a process-independent clock constant has no side effects.
     let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
     if hz <= 0 {
         return None;
     }
-    let hz = hz as u64;
-    let boot: u64 = fs::read_to_string("/proc/stat")
+    let boot = fs::read_to_string("/proc/stat")
         .ok()?
         .lines()
         .find_map(|line| line.strip_prefix("btime "))?
         .trim()
         .parse()
         .ok()?;
-    UNIX_EPOCH
-        .checked_add(Duration::from_secs(boot + ticks / hz))?
-        .checked_add(Duration::from_nanos((ticks % hz) * 1_000_000_000 / hz))
+    Some(CLOCK.get_or_init(|| (boot, hz as u64)))
 }
 
 fn first_message_title(path: &Path) -> Option<String> {
@@ -199,6 +271,77 @@ fn first_message_title(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ancestry_is_bounded_and_rejects_foreign_reused_or_reparented_processes() {
+        let time = |seconds| UNIX_EPOCH + Duration::from_secs(seconds);
+        let graph = std::collections::HashMap::from([
+            (
+                10,
+                ProcessIdentity {
+                    parent: 1,
+                    started: time(1),
+                },
+            ),
+            (
+                11,
+                ProcessIdentity {
+                    parent: 10,
+                    started: time(2),
+                },
+            ),
+            (
+                12,
+                ProcessIdentity {
+                    parent: 11,
+                    started: time(3),
+                },
+            ),
+            (
+                13,
+                ProcessIdentity {
+                    parent: 12,
+                    started: time(4),
+                },
+            ),
+        ]);
+        let read = |pid| graph.get(&pid).copied();
+        assert_eq!(
+            owned_process_start_using(10, 13, time(1), read),
+            Some(time(4))
+        );
+        assert!(owned_process_start_using(20, 13, time(1), read).is_none());
+        assert!(owned_process_start_using(10, 13, time(2), read).is_none());
+        let mut stale = graph.clone();
+        stale.get_mut(&12).unwrap().started = time(5);
+        assert!(
+            owned_process_start_using(10, 13, time(1), |pid| stale.get(&pid).copied()).is_none()
+        );
+        let reads = std::cell::Cell::new(0);
+        assert!(owned_process_start_using(10, 13, time(1), |pid| {
+            if pid == 13 {
+                reads.set(reads.get() + 1);
+                if reads.get() > 2 {
+                    return None;
+                }
+            }
+            read(pid)
+        })
+        .is_none());
+        let mut deep = graph;
+        for pid in 14..40 {
+            deep.insert(
+                pid,
+                ProcessIdentity {
+                    parent: pid - 1,
+                    started: time(u64::from(pid)),
+                },
+            );
+        }
+        assert!(
+            owned_process_start_using(10, 39, time(1), |pid| deep.get(&pid).copied()).is_none()
+        );
+    }
 
     fn session(cwd: &Path) -> SessionInfo {
         SessionInfo {

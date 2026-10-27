@@ -24,7 +24,7 @@ probe = []
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.29"
+crossterm = { version = "0.29", features = ["use-dev-tty"] }
 fs2 = "0.4"
 libc = "0.2"
 portable-pty = "0.9"

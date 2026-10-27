@@ -30,7 +30,11 @@ class Board:
             fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 26, 120, 0, 0))
             os.execve(str(BINARY), [str(BINARY)], env)
         self.frames = b""
-        self.wait(b"Kiro sessions")
+        try:
+            self.wait(b"Kiro sessions")
+        except BaseException:
+            self.close()
+            raise
         self.all = False
 
     def drain(self, duration=0.2):
