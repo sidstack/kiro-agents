@@ -5,6 +5,13 @@ Conventional Commits by release-please.
 
 ## Local MVP history (before automated releases)
 
+## [0.4.2](https://github.com/sidstack/kiro-agents/compare/v0.4.1...v0.4.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* stop terminal hangup CPU spins and resolve native session names ([#19](https://github.com/sidstack/kiro-agents/issues/19)) ([2123a61](https://github.com/sidstack/kiro-agents/commit/2123a61d20db98691d2dcfcaf35913b3a19f9729))
+
 ## [0.4.1](https://github.com/sidstack/kiro-agents/compare/v0.4.0...v0.4.1) (2026-10-26)
 
 

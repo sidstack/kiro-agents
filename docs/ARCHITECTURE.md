@@ -214,6 +214,7 @@ Updated frontends use that state-store API to name/clear sessions even when conn
 to a pre-naming host; they do not rewrite its registry or restart its processes.
 Lifecycle actions still go through the host's existing versioned protocol. This is
 dashboard/metadata upgrade compatibility, not hot replacement of a PTY-owning daemon.
+
 ### Frontend upgrades and navigation
 
 A new standalone invocation runs the executable selected by the shell. Connecting
