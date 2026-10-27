@@ -164,19 +164,26 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
                 parts[0],
             );
             input_cursor(frame, parts[0], "Search or path: ", &picker.query, 1);
+            // Materialize only the viewport, even for a six-figure cached list.
+            let visible = usize::from(parts[1].height).max(1);
+            let start = picker.selected.saturating_sub(visible.saturating_sub(1));
             let items = picker
                 .candidates
                 .iter()
+                .skip(start)
+                .take(visible)
                 .map(|row| ListItem::new(format!("{:<7} {}", row.origin.label(), row.path)))
                 .collect::<Vec<_>>();
-            let mut state =
-                ListState::default().with_selected((!items.is_empty()).then_some(picker.selected));
+            let mut state = ListState::default()
+                .with_selected((!items.is_empty()).then_some(picker.selected - start));
             frame.render_stateful_widget(choice_list(items), parts[1], &mut state);
             let notice = if !message.is_empty() {
                 message
             } else {
-                picker.notice.as_deref().unwrap_or(if picker.truncated {
-                    "More directories available; type to narrow the list."
+                picker.notice.as_deref().unwrap_or(if picker.scanning {
+                    "Discovering directories recursively… Type to search while loading."
+                } else if picker.truncated {
+                    "Directory scan limit reached; Ctrl+R retries or type an explicit path."
                 } else {
                     "Choose a directory, then choose its native Kiro agent."
                 })
@@ -390,6 +397,10 @@ mod tests {
             truncated: false,
             notice: None,
             recents: Vec::new(),
+            discovery: None,
+            indexed: Vec::new(),
+            scanning: false,
+            scan_limited: false,
         }
     }
 

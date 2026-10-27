@@ -119,7 +119,7 @@ def main():
         projects = [scratch / name for name in ["api-gateway", "code-reviewer", "legacy-app"]]
         for project in projects:
             project.mkdir()
-        env = dict(os.environ, KIRO_AGENTS_HOME=str(scratch / "state"),
+        env = dict(os.environ, HOME=str(scratch), KIRO_AGENTS_HOME=str(scratch / "state"),
                    KIRO_AGENTS_KIRO_BIN=str(ROOT / "tests/fake-kiro/kiro-cli"), TERM="xterm-256color")
         # Agent discovery fixture: the picker must offer reviewer without typing.
         agents = scratch / "agents.json"

@@ -1,3 +1,4 @@
+mod directories;
 mod model;
 mod picker;
 mod screen;
@@ -149,7 +150,7 @@ impl App {
                 }
                 KeyCode::Char('r') => {
                     match &mut self.mode {
-                        Mode::Directory(picker) => picker.rebuild(),
+                        Mode::Directory(picker) => picker.refresh(),
                         Mode::Agent { picker, .. } => {
                             self.scan = None;
                             self.scan_token += 1;
@@ -400,6 +401,13 @@ impl App {
     }
 
     fn poll_scan(&mut self) -> bool {
+        let directories_changed = match &mut self.mode {
+            Mode::Directory(picker)
+            | Mode::Agent {
+                directory: picker, ..
+            } => picker.poll_directories(),
+            _ => false,
+        };
         let result = self.scan.as_ref().and_then(|scan| scan.try_recv().ok());
         if let Some(scan) = result {
             self.scan = None;
@@ -407,7 +415,7 @@ impl App {
                 return picker.apply(scan);
             }
         }
-        false
+        directories_changed
     }
 
     fn apply_rows(&mut self, result: Result<Vec<SessionInfo>, String>) -> bool {

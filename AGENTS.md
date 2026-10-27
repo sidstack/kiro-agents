@@ -198,3 +198,11 @@ PageUp enter/scroll copy mode, not prompt-history or injected page keys. Preserv
 native mouse events for applications that request them and native page keys for
 alternate-screen applications. Test actual viewport movement and no input leakage,
 not only echoed key bytes. Do not change direct native attach passthrough.
+
+Directory selection recursively indexes home (plus cwd outside home) in a cancellable
+background worker. Keep all discovered rows searchable and scrollable; render only
+the viewport. Reuse the private directory-cache for 24 hours, show stale results
+while refreshing, and make Ctrl+R force a rescan. Preserve explicit paths and
+selection-only creation. Discovery excludes hidden/dependency/build trees and
+symlinks, has directory/entry/time bounds, and never requires fd/fzf. Cache tests
+must isolate HOME/state and cover TTL, force, corrupt-file recovery and permissions.

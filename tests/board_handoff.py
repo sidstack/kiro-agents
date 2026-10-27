@@ -109,7 +109,7 @@ class Board:
 
 
 with tempfile.TemporaryDirectory(prefix="kiro-handoff-test-") as scratch:
-    env = dict(os.environ, KIRO_AGENTS_HOME=scratch + "/state",
+    env = dict(os.environ, HOME=str(scratch), KIRO_AGENTS_HOME=scratch + "/state",
                KIRO_AGENTS_KIRO_BIN=str(ROOT / "tests/fake-kiro/kiro-cli"),
                TERM="xterm-256color")
     env["KIRO_HOME"] = env["KIRO_AGENTS_HOME"] + "/kiro"

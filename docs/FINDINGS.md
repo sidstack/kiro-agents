@@ -320,3 +320,23 @@ and detaches with Ctrl+Q while preserving the Kiro PID:
 `python3 tests/terminal_smoke.py target/debug/kiro-agents /path/to/v0.4.2/kiro-agents`.
 Already running frontends retain their executable until exit; installer replacement
 applies to subsequent launches. SSH-client shortcut acceptance remains manual.
+
+## 2026-10-27 — Recursive directory search and daily cache
+
+Inspection of the previous picker showed that fuzzy ranking was applied only to
+up to 200 immediate children and siblings, then reduced to 40 rows. This could not
+find deeply nested projects or present the complete directory list. The local
+`fdh` reference enumerates directories recursively under `$HOME` before fuzzy
+selection. Discovery now follows that scope in a background worker, with an
+additional cwd root outside home, and retains all discovered matches. Explicit
+paths and current/recent directory choices remain available immediately.
+
+A private, atomically replaced JSON cache records only directory paths and scan
+metadata, keyed by roots, with a rolling 24-hour TTL. Fresh lists are reused across
+frontend launches; expired lists are shown while a replacement is scanned. Ctrl+R
+bypasses the cache. Hidden/dependency/build trees and symlinks are excluded; scans
+have explicit directory, entry and elapsed-time bounds. This is a read-only
+filesystem enumeration, with no Kiro/session-file access or external fd/fzf
+requirement. Model and real-PTY regressions cover deep matching, lists beyond the
+old 200/40 limits, fresh-cache reuse, forced refresh, daily expiry, corrupt-cache
+recovery, and private permissions.
