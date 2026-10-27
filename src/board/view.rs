@@ -96,7 +96,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
         _ => board.selected().map_or_else(
             || "No matching sessions. Ctrl+N creates a fresh session.".into(),
             |row| if row.state == "live" {
-                format!("{}\nEnter attaches · Ctrl+B d returns here", row.cwd)
+                format!("{}\nEnter attaches · Ctrl+Q returns here", row.cwd)
             } else {
                 format!("Cannot attach: session is {} (exit {}). Use Kiro history manually or Ctrl+N for a fresh session.\n{}",
                     row.state, row.exit_code.map_or_else(|| "unknown".into(), |code| code.to_string()), row.notice.as_deref().unwrap_or(""))

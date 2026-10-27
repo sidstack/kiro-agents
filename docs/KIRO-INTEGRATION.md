@@ -110,7 +110,7 @@ Logs: macOS `$TMPDIR/kiro-log/`, Linux `$XDG_RUNTIME_DIR/kiro-log/` or `/tmp/kir
 - Kiro Crew (`kiro-cli crew`, `kirocrew`, `~/.kiro/crew`, port 5476) is a separate persistent
   multi-channel product built on an ACP harness. Out of scope; noted so we do not collide. **[doc]**
 
-## Kiro terminal UI keys we must not steal
+## Kiro terminal UI keys and wrapper override
 
 `Ctrl+C` exit · `Ctrl+D` exit / navigate monitor · `Ctrl+G` crew monitor · `Ctrl+X` activity
 tray / spec review · `Ctrl+T` transcript or tangent · `Ctrl+O` expand output · `Ctrl+R`
@@ -119,7 +119,10 @@ history search · `Ctrl+S` fuzzy search · `Ctrl+J` newline · `Ctrl+U` half-pag
 mode · `Esc` cancel · `!` shell escape · `/editor` opens `$EDITOR` · `/fullscreen` dedicated
 full-terminal view · `KIRO_NO_SYNCHRONIZED` escape hatch. **[doc]**
 
-Our leader key defaults to `Ctrl+B` (unused by Kiro) and is configurable.
+The wrapper reserves Ctrl+Q for detach/dashboard navigation. Kiro's crew shortcut
+Ctrl+G and tmux's Ctrl+B prefix retain their native behavior. Left Arrow always
+passes through. There is no editor-state integration or configurable shortcut
+in the current implementation.
 
 ## ACP (known, deliberately out of scope)
 

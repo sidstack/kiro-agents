@@ -17,7 +17,7 @@ expression: "render(&board, &Mode::Browse, 100, 20)"
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 /work/project
-Enter attaches · Ctrl+B d returns here
+Enter attaches · Ctrl+Q returns here
 
 ↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh
 Ctrl+N create · F2 rename · Ctrl+K stop · q/Ctrl+Q quit

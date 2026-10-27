@@ -173,3 +173,10 @@ closed terminal frontends exit. The bounded CPU/PTY/host EOF regression runs in 
 check and against extracted betas. Native title ownership may use a bounded,
 start-time-checked descendant parent chain; main-thread children lists alone miss
 Kiro's runtime-thread launcher chain. See docs/INCIDENT-2026-10-26-CPU.md.
+
+Attached frontend navigation uses Ctrl+Q alone to return to the dashboard. Preserve
+Kiro's native Ctrl+G crew shortcut and tmux's Ctrl+B prefix. Left Arrow always
+passes through; do not infer editor emptiness from keystrokes or terminal output.
+Navigation belongs to the frontend: relaunch it after installation without
+restarting the host or managed sessions. Test Ctrl+Q through a real PTY with raw
+mode/IXON verification, plus native Ctrl+G and Ctrl+B byte passthrough.
