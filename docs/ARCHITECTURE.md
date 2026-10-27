@@ -62,10 +62,11 @@ resize    --> TIOCSWINSZ on PTY master + SIGWINCH to the child's process group
   and Kiro's own key handling stay Kiro's.
 - The pipe exists only because the child must survive your terminal closing. A child that
   shares your real tty dies with it; a child on a PTY owned by the host does not.
-- The leader-key filter is the single exception to "raw": it recognizes one prefix
-  (`Ctrl+B` by default) and forwards everything else byte-for-byte. `Ctrl+B Ctrl+B` sends a
-  literal `Ctrl+B`. Kiro's own keys (`Ctrl+C/D/G/X/O/R/S/T/U/J/Z`, `Tab`, `Shift+Tab`,
-  `Esc`, `Up/Down`) are never intercepted.
+- The dashboard shortcut filter is the single exception to "raw": `Ctrl+G` detaches
+  to the board (or shell for standalone attach). This explicit user choice overrides
+  Kiro's native crew shortcut and avoids tmux's Ctrl+B prefix. All other keys,
+  including Left Arrow and Ctrl+B, pass through byte-for-byte. Editor emptiness
+  is not inferred from keystrokes or terminal output.
 
 ### Detached sessions keep running
 
@@ -170,7 +171,7 @@ Separate ratatui screen, not an overlay on Kiro's UI. Filters **Active** (ready,
 needs_input, failed), **Idle**, **All**; type to search sessions and projects; `Enter`
 attaches; `Ctrl+N` creates in another directory; `Ctrl+X` aborts the selected turn
 (`SIGINT` to the child's process group); `Ctrl+K` stops a session; `Ctrl+Q`/`Ctrl+Z` leave
-the board. Status line: `sessions 6 · 1 running · 2 needs input · 1 ready · Ctrl+B`.
+the board. Status line: `sessions 6 · 1 running · 2 needs input · 1 ready · Ctrl+G`.
 
 ## Feature toggles
 
@@ -187,7 +188,7 @@ the board. Status line: `sessions 6 · 1 running · 2 needs input · 1 ready · 
   "autoName": true,
   "historyImport": true,
   "hooksTelemetry": false,
-  "leaderKey": "ctrl+b",
+  "leaderKey": "ctrl+g",
   "autoUpdateHost": true,
   "defaultGeneration": "v3",
   "maxLiveSessions": 12,
@@ -213,3 +214,14 @@ Updated frontends use that state-store API to name/clear sessions even when conn
 to a pre-naming host; they do not rewrite its registry or restart its processes.
 Lifecycle actions still go through the host's existing versioned protocol. This is
 dashboard/metadata upgrade compatibility, not hot replacement of a PTY-owning daemon.
+
+### Frontend upgrades and navigation
+
+A new standalone invocation runs the executable selected by the shell. Connecting
+to an existing host does not relaunch the host executable as the dashboard or
+attach frontend. The host retains the live Kiro process and PTY, while Ctrl+G
+filtering runs in the invoking frontend. Installing a replacement does not change
+an already running frontend; exit that frontend and invoke the installed binary
+again. No host restart is required. Stable v0.4.2 predates the standalone Ctrl+G
+backport; its Ctrl+B d behavior is a release omission, not evidence of an old
+host imposing its shortcuts on a new frontend.

@@ -24,7 +24,7 @@ struct Cli {
 enum Command {
     /// Open the session board (plain list when piped)
     Board,
-    /// Start a fresh V2 session and attach (Ctrl+B d detaches)
+    /// Start a fresh V2 session and attach (Ctrl+G detaches)
     New {
         #[arg(default_value = ".")]
         dir: PathBuf,
@@ -185,7 +185,7 @@ fn display(rows: &[SessionInfo]) -> Result<()> {
     let mut output = io::stdout().lock();
     writeln!(
         output,
-        "Kiro V2 sessions · Ctrl+B d detaches · quitting leaves sessions alive"
+        "Kiro V2 sessions · Ctrl+G detaches · quitting leaves sessions alive"
     )?;
     if rows.is_empty() {
         writeln!(

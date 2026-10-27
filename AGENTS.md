@@ -173,3 +173,9 @@ closed terminal frontends exit. The bounded CPU/PTY/host EOF regression runs in 
 check and against extracted betas. Native title ownership may use a bounded,
 start-time-checked descendant parent chain; main-thread children lists alone miss
 Kiro's runtime-thread launcher chain. See docs/INCIDENT-2026-10-26-CPU.md.
+
+Attached frontend navigation uses Ctrl+G to return to the board. This explicit user
+choice replaces Kiro's native Ctrl+G crew shortcut while attached. Ctrl+B and Left
+Arrow pass through unchanged. Shortcut handling belongs to the frontend: upgrades
+apply on a fresh frontend launch without restarting the session host. An already
+running frontend continues using its original executable until it exits.

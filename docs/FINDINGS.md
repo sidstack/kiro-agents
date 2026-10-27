@@ -205,3 +205,17 @@ had no conversation rows; its descriptor alone did not identify the active sessi
 No auth rows, transcript text or native titles were printed. The real sessions were
 stopped during containment, so the new behavior is verified with isolated delegated
 fake-Kiro fixtures rather than claiming a live authenticated acceptance result.
+
+## 2026-10-27 — standalone shortcut release boundary
+
+Stable v0.4.2 still contains the Ctrl+B d attach filter; Ctrl+G was present only
+on the workspace feature branch. Treating the stable behavior as an old host
+reusing its frontend was incorrect. Attach filtering executes in the invoking
+frontend, independently of the host executable. A bounded fake-Kiro PTY check
+started the host using the verified public v0.4.2 binary, attached with the
+backported frontend, confirmed Ctrl+B d reached fake Kiro unchanged, and confirmed
+Ctrl+G detached while preserving the same Kiro PID. Command:
+`python3 tests/terminal_smoke.py target/debug/kiro-agents /path/to/v0.4.2/kiro-agents`.
+No live host or real Kiro session was restarted. Already running frontends retain
+their executable until they exit; the installer only replaces the executable for
+subsequent launches.

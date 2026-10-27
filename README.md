@@ -70,8 +70,9 @@ kiro-agents doctor
 kiro-agents                    # open the dashboard; Ctrl+N creates a session
 ```
 
-Inside Kiro, use it normally. **Ctrl+B, then d** detaches without stopping Kiro.
-**Ctrl+B Ctrl+B** sends a literal Ctrl+B. Other key combinations pass through.
+Inside Kiro, use it normally. **Ctrl+G** detaches without stopping Kiro.
+This shortcut opens the dashboard instead of Kiro’s native crew monitor.
+Left Arrow and other keys retain native behavior.
 Exiting inside Kiro ends its process; detach instead to keep it attachable.
 When opened from the board, detach returns to the board. Explicit `attach` and
 `new` commands return to the shell.
