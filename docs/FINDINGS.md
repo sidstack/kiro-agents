@@ -185,3 +185,23 @@ and a visible frontend version. The regression test uses a pre-naming protocol f
 in CI and was also run against an isolated copy of the actual v0.2.0 executable with
 fake Kiro and temporary HOME/Kiro/XDG/state roots. Manual rename/clear did not alter
 legacy registry metadata or child PIDs, and no unsupported Rename RPC was sent.
+
+## CPU incident and verified naming ownership follow-up (2026-10-26)
+
+See [the incident report](INCIDENT-2026-10-26-CPU.md). A bounded isolated reproduction
+closed one dashboard PTY and observed a surviving frontend using 0.49 CPU seconds
+in a 0.5-second interval; the harness immediately killed and reaped its own process.
+Crossterm 0.29's selected mio backend retries terminal EOF/EIO inside its input loop,
+preventing the application's signal flag from being checked. The implementation now
+selects its error-propagating use-dev-tty backend and checks terminal HUP/ERR separately.
+This reproduces the incident signature, not the provenance of every historical process.
+
+The earlier SQLite-only inference was incorrect for the user's three live sessions.
+Their lock owners were descendants along launcher → kiro-cli-chat → bun → kiro-cli-chat
+chains. Immediate/main-thread children inspection missed runtime-thread launches.
+Walking each native lock owner's parent chain verified ownership without guessing by
+directory or reading terminal output. The launcher's open SQLite general-state database
+had no conversation rows; its descriptor alone did not identify the active session store.
+No auth rows, transcript text or native titles were printed. The real sessions were
+stopped during containment, so the new behavior is verified with isolated delegated
+fake-Kiro fixtures rather than claiming a live authenticated acceptance result.

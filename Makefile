@@ -13,6 +13,7 @@ check:
 	python3 tests/board_search.py
 	python3 tests/board_naming.py
 	python3 tests/naming_upgrade.py
+	python3 tests/frontend_lifecycle.py
 	sh -n install.sh
 	python3 tests/installer.py
 	python3 tests/release_package.py

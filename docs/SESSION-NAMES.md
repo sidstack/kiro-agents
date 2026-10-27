@@ -28,9 +28,11 @@ older hosts' metadata read-only without replacing the host. Host-side configurat
 still inherited at host startup; updating the frontend never stops existing sessions. The feature keeps no child
 processes, open files, models or background tasks to clean up on host close.
 
-Native titles are accepted only when one fresh lock matches the owned live child PID,
+Native titles are accepted only when one fresh lock matches the owned live child PID or a verified native descendant,
 its matching metadata has the same session ID and cwd, and the lock is newer than that
-process's start. Names are never guessed from the newest conversation in a directory.
+process's start. Descendants must lead back to the owned launcher through at most
+12 parent links, with chronological start times and identity rechecks. This covers
+runtime-thread launches through intermediate Kiro/bun processes. Names are never guessed from the newest conversation in a directory.
 Missing, ambiguous, stale, unsupported or oversized metadata uses the fallback label.
 The scan stops at 10,000 directory entries; metadata files are capped at 64 KiB.
 
@@ -40,15 +42,17 @@ its associated JSONL file. The reader examines at most eight records, each cappe
 assistant/tool content. This is a local extractive fallback; Kiro's native title takes
 precedence when available. No additional embedded model, download or paid call is
 required. Auto-labels containing URLs or common credential prefixes are rejected. Only the derived name is saved in wrapper metadata; no transcript is copied
-or logged. Unsupported SQLite-only session layouts fall back without inspecting the
-auth database or guessing a session identity.
+or logged. An open SQLite descriptor does not establish that a session uses a
+SQLite-only store: Kiro launchers also open their general state database. Unsupported
+SQLite-only layouts still fall back without reading auth records or guessing identity.
 
 New naming fields are optional on the wire and in old registries. The dashboard and
 CLI use the shared state-store name map after reading status, including responses from
 pre-naming hosts. Older frontend versions do not understand the new name map. Native
 SQLite TUI sessions without a verified PID/session association cannot get automatic
 Kiro titles yet; they show unique project/agent/ID labels and support manual naming.
-Verified SQLite/V2/V3 store adapters remain next-batch work. Do not replace or stop a
+General SQLite/V2/V3 store adapters remain next-batch work; verified descendant
+file-lock naming does not require them. Do not replace or stop a
 host with live sessions to make naming work. The dashboard header displays the frontend
 version so a successful binary upgrade is visible.
 
