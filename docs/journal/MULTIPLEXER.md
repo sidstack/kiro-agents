@@ -81,3 +81,8 @@ output and q exits copy mode. Native mouse/full-screen page handling remains nat
 Regression acceptance now requires actual viewport movement with numbered history,
 rather than echoed escape bytes. The existing private server received only the new
 scroll bindings; pane processes were preserved.
+
+MobaXterm SSH acceptance: user confirmed PageUp/PageDown and then Shift+MouseWheel
+scrolling work. Ordinary wheel events arrive as prompt-history arrows; keep native
+Up/Down unchanged and document the verified Shift modifier. This is a client-specific
+workaround, not a claim that ordinary wheel scrolling is fixed for every terminal.

@@ -90,5 +90,8 @@ Run `python3 probes/scroll_input.py` in an ordinary SSH shell to capture origina
 client input. For comparison, run it with `--inside-tmux` in a plain shell pane to
 capture what tmux forwards. Do not run it in a Kiro prompt. The two capture points
 answer different questions; forwarded arrows cannot reveal their original source.
-Mobatek has documented Shift+MouseWheel for tmux; try that modifier with mouse mode
-enabled. It is a client workaround to verify, not a confirmed plain-wheel fix.
+For this MobaXterm SSH setup, the user verified **Shift+MouseWheel** scrolling with
+mouse mode enabled. PageUp/PageDown also work; q leaves tmux scrollback. Ordinary
+wheel scrolling still produces prompt-history arrows, so use the Shift modifier.
+This confirms the workaround for the tested setup, not all client versions or a
+plain-wheel fix. Native Up/Down prompt-history keys remain unchanged.

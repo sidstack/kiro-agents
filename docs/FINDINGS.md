@@ -289,3 +289,9 @@ The historical mode-mouse option in the old Mobatek post is obsolete; this priva
 server already uses modern mouse=on. Shift+wheel acceptance for this client remains
 unverified. Do not disable alternate-screen support or steal ordinary prompt arrows
 as an automatic compatibility fix.
+
+Manual acceptance follow-up: the user confirmed that Shift+MouseWheel works in the
+current MobaXterm SSH workspace. PageUp/PageDown were already confirmed working.
+Record Shift+wheel as a verified workaround for that setup, not a plain-wheel fix
+or acceptance for every terminal/version. No additional live bindings or native
+arrow-key overrides were needed. The MobaXterm version was not supplied.
