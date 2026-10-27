@@ -80,13 +80,15 @@ focus, zoom, close confirmation, Ctrl+G inner detach and workspace detach.
 The same suite runs against the extracted optimized beta binary in branch CI.
 Authenticated Kiro and browser/Guacamole visual acceptance remain manual checks.
 
-MobaXterm SSH wheel compatibility remains unconfirmed: the user reports working
-direct-session scrolling and working workspace PageUp/PageDown, but broken wheel
-input. SGR and legacy mouse-report tests pass; some clients may substitute ordinary
-arrow keys instead of mouse events. Those are indistinguishable from intentional
+MobaXterm SSH wheel compatibility is not resolved: the user reports working direct
+scrolling and workspace PageUp/PageDown, but wheel input arrives as CSI arrows
+inside tmux and SS3 arrows outside. SGR and legacy mouse-report tests pass; the
+reported client instead substitutes ordinary arrow keys. Those are indistinguishable from intentional
 prompt-history keys, so the application must not guess and intercept them. See
 the MobaXterm investigation in [findings](FINDINGS.md) and the optional input probe.
 Run `python3 probes/scroll_input.py` in an ordinary SSH shell to capture original
 client input. For comparison, run it with `--inside-tmux` in a plain shell pane to
 capture what tmux forwards. Do not run it in a Kiro prompt. The two capture points
 answer different questions; forwarded arrows cannot reveal their original source.
+Mobatek has documented Shift+MouseWheel for tmux; try that modifier with mouse mode
+enabled. It is a client workaround to verify, not a confirmed plain-wheel fix.

@@ -273,3 +273,19 @@ It classifies only recognized control events, discards printable input, saves
 no files and restores terminal modes on exit; it never accesses Kiro state. The
 parser self-test and a bounded PTY cleanup/text-discard test passed. Actual
 MobaXterm-client capture remains required before claiming reproduction or resolution.
+
+User capture follow-up: wheel movement produced CSI Up/Down inside tmux and SS3
+Up/Down outside, with unchanged PageUp/PageDown encodings. Both wheel results are
+ordinary arrow events, matching the isolated arrow-substitution reproduction;
+the CSI/SS3 difference is consistent with tmux's cursor-mode normalization. The
+client version and modifier behavior remain unspecified. This does not establish
+that all MobaXterm versions/settings behave the same way or that the issue is fixed.
+
+Upstream search found a [tmux maintainer explanation of this alternate-screen interaction](https://github.com/tmux/tmux/issues/1795)
+and [Mobatek's documented Shift+MouseWheel support for tmux](https://blog.mobatek.net/post/mobaxterm-new-release-8.2/).
+Mobatek also documents [ScrollMod=shift](https://blog.mobatek.net/post/mobaxterm-configuration-settings/).
+These support trying the client modifier before further server key remapping.
+The historical mode-mouse option in the old Mobatek post is obsolete; this private
+server already uses modern mouse=on. Shift+wheel acceptance for this client remains
+unverified. Do not disable alternate-screen support or steal ordinary prompt arrows
+as an automatic compatibility fix.
