@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix="kiro-search-test-") as tmp:
         board.type("project-")
         board.wait_for("project-000")
         board.key(b"\x1b[B" * 245, 0.4)
-        expect(board.screen.text(), "project-239")
+        board.wait_for("project-239")
         board.key(b"\x15", 0.3)
         # Warm cache is reused; explicit refresh reveals newly created dirs.
         cache_files = list((scratch / "state/directory-cache").glob("*.json"))
