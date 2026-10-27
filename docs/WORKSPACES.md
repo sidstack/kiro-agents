@@ -79,3 +79,10 @@ HOME/XDG/Kiro paths. A real tmux client in a PTY exercises split/window/shell bi
 focus, zoom, close confirmation, Ctrl+G inner detach and workspace detach.
 The same suite runs against the extracted optimized beta binary in branch CI.
 Authenticated Kiro and browser/Guacamole visual acceptance remain manual checks.
+
+MobaXterm SSH wheel compatibility remains unconfirmed: the user reports working
+direct-session scrolling and working workspace PageUp/PageDown, but broken wheel
+input. SGR and legacy mouse-report tests pass; some clients may substitute ordinary
+arrow keys instead of mouse events. Those are indistinguishable from intentional
+prompt-history keys, so the application must not guess and intercept them. See
+the MobaXterm investigation in [findings](FINDINGS.md) and the optional input probe.

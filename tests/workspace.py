@@ -208,6 +208,19 @@ def main():
             wait(lambda: scroll_position(second) < before, 'PageDown did not move viewport down')
             if tmux('display-message', '-p', '-t', second, '#{pane_in_mode}').strip() == '1':
                 press(b'q')
+            # Legacy X10 wheel reporting must work as well as SGR reporting.
+            press(b'\x1b[M' + bytes([64 + 32, x + 3 + 32, y + 3 + 32]))
+            wait(lambda: scroll_position(second) > 0, 'legacy mouse wheel did not scroll')
+            press(b'q')
+            # Reproduce the reported MobaXterm substitution: these are ordinary
+            # keyboard arrows on the wire, so tmux cannot identify them as wheel
+            # events without also stealing intentional prompt-history keys.
+            for key in [b'\x1b[A', b'\x1bOA']:
+                before_arrows = received(second).count('1b5b41')
+                press(key)
+                # Tmux normalizes CSI/SS3 input to the child's normal-cursor mode.
+                wait(lambda: received(second).count('1b5b41') > before_arrows, 'native arrow-key passthrough changed')
+                assert tmux('display-message', '-p', '-t', second, '#{pane_in_mode}').strip() == '0'
             # A full-screen application that requests mouse reporting keeps its
             # native mouse and paging keys; do not force it into copy mode.
             tmux('send-keys', '-t', second, '-l', 'screen')

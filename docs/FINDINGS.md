@@ -249,3 +249,27 @@ applications retain their input paths. The regression produces a numbered retain
 history, requires positive/decreasing scroll positions, verifies the correct pane,
 and checks that scrollback navigation injects no prompt keys. Browser acceptance
 still requires the user's confirmation; fake byte echo alone is not acceptance.
+
+## MobaXterm SSH wheel reproduction gap (2026-10-27)
+
+The user confirmed that the same Kiro session scrolls correctly through direct
+kiro-agents, including in MobaXterm over SSH. Workspace PageUp/PageDown work after
+the copy-mode correction, while wheel scrolling remains broken. This is not a
+successful authenticated/client acceptance result; stop changing live bindings
+until the client input is established.
+
+An isolated real-tmux PTY regression now checks both SGR and legacy X10 mouse
+reports: both scroll retained output. Replaying ordinary CSI/SS3 Up sequences
+instead reproduces the prompt-input path without entering scrollback. Tmux may
+normalize the arrow encoding for the child, but cannot know whether it originated
+from a wheel or a keyboard. Do not remap ordinary arrows based on guesses.
+
+A [MobaXterm report with byte-level evidence](https://github.com/anthropics/claude-code/issues/71085)
+describes this arrow substitution even while mouse reporting is enabled. This is
+a candidate explanation, not a capture from the user's exact client/version.
+The opt-in `python3 probes/scroll_input.py` probe compares a normal screen with
+tmux-like alternate/application-cursor/mouse modes over the user's SSH connection.
+It classifies only recognized control events, discards printable input, saves
+no files and restores terminal modes on exit; it never accesses Kiro state. The
+parser self-test and a bounded PTY cleanup/text-discard test passed. Actual
+MobaXterm-client capture remains required before claiming reproduction or resolution.
