@@ -140,3 +140,13 @@ and its temporary credential copies removed after workers disconnected.
   tests. Strict make audit and actionlint passed. See FINDINGS and the incident report.
 - This core backport does not introduce the optional workspace feature or change
   stable shortcut bindings; workspace/Ctrl+G acceptance remains in the feature PR.
+
+## Standalone navigation backport
+
+- Move native-attach navigation from Ctrl+B d to Ctrl+Q on the stable branch.
+- Preserve Ctrl+B sequences, arrows, scroll and resize as native input.
+- Keep session ownership in the existing host; re-entering with the updated
+  frontend adopts the new shortcut without a host restart.
+- Validate the actual PTY detach path and regression coverage for forwarded keys.
+
+- Preserve Kiro’s Ctrl+G crew shortcut and verify raw-mode IXON is disabled.

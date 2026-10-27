@@ -15,6 +15,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / "target/debug/kiro-agents"
+# An optional released binary starts the host to verify frontend-only upgrades.
+HOST_BINARY = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else BINARY
 
 
 def expect(master, marker):
@@ -76,7 +78,8 @@ with tempfile.TemporaryDirectory(prefix="kiro-terminal-test-") as scratch:
 
     frontends = set()
     try:
-        call("new", scratch, "--v2", "--no-attach")
+        subprocess.check_output([str(HOST_BINARY), "new", scratch, "--v2", "--no-attach"],
+                                env=env, timeout=8)
         rows = json.loads(call("status", "--json"))
         identifier, child_pid = rows[0]["id"], rows[0]["pid"]
         pid, master = attach(identifier)
@@ -86,7 +89,13 @@ with tempfile.TemporaryDirectory(prefix="kiro-terminal-test-") as scratch:
         expect(master, b"SIZE:117x39")
         os.write(master, b"hi")
         expect(master, b"BYTES:6869")
+        # Native Kiro crew and tmux prefix sequences remain untouched.
+        os.write(master, b"\x07")
+        expect(master, b"BYTES:07")
         os.write(master, b"\x02d")
+        expect(master, b"BYTES:0264")
+        assert not termios.tcgetattr(master)[0] & termios.IXON, "Ctrl+Q must bypass software flow control"
+        os.write(master, b"\x11")
         assert os.waitstatus_to_exitcode(reap(pid)) == 0
         frontends.remove(pid)
         assert termios.tcgetattr(master)[3] & termios.ICANON

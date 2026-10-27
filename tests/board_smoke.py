@@ -87,7 +87,7 @@ class Board:
 
     def detach(self):
         self.frames = b""
-        self.press(b"\x02d")
+        self.press(b"\x11")
         self.wait(b"Kiro sessions")
 
     def finish(self, sig=None):

@@ -70,8 +70,9 @@ kiro-agents doctor
 kiro-agents                    # open the dashboard; Ctrl+N creates a session
 ```
 
-Inside Kiro, use it normally. **Ctrl+B, then d** detaches without stopping Kiro.
-**Ctrl+B Ctrl+B** sends a literal Ctrl+B. Other key combinations pass through.
+Inside Kiro, use it normally. **Ctrl+Q** detaches without stopping Kiro.
+Kiro’s Ctrl+G crew shortcut and tmux’s Ctrl+B prefix keep their native behavior.
+Left Arrow and other keys retain native behavior.
 Exiting inside Kiro ends its process; detach instead to keep it attachable.
 When opened from the board, detach returns to the board. Explicit `attach` and
 `new` commands return to the shell.

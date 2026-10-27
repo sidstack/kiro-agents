@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='kiro-picker-test-') as tmp:
         rows = json.loads(call('status', '--json'))
         assert len(rows) == 1 and rows[0]['agent'] == 'reviewer'
         board.frames = b''
-        board.press(b'\x02d')
+        board.press(b'\x11')
         board.wait(b'Kiro sessions')
         board.finish()
         assert json.loads(call('status', '--json'))[0]['pid'] == rows[0]['pid']

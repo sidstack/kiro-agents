@@ -205,3 +205,26 @@ had no conversation rows; its descriptor alone did not identify the active sessi
 No auth rows, transcript text or native titles were printed. The real sessions were
 stopped during containment, so the new behavior is verified with isolated delegated
 fake-Kiro fixtures rather than claiming a live authenticated acceptance result.
+
+## 2026-10-27 — standalone shortcut and executable identity
+
+Stable v0.4.2 contains the Ctrl+B d attach filter. The user withdrew the feature
+branch's Ctrl+G choice after encountering Kiro's native crew panel; Ctrl+Q is the
+replacement single shortcut. Kiro's documented shortcuts do not list Ctrl+Q and
+tmux 3.4's default bindings do not assign it. Sources:
+https://kiro.dev/docs/cli/terminal-ui/ and
+https://github.com/tmux/tmux/blob/3.4/key-bindings.c.
+
+The installed executable reported 0.4.2-beta.36.1 but differed from that release's
+checksum-verified executable: the installed copy forwarded Ctrl+G and detached on
+Ctrl+B d; the published beta intercepted Ctrl+G. A version string alone does not
+establish executable identity. No installed binary or running user host was changed
+by this investigation.
+
+Attach filtering belongs to the invoking frontend, independently of host version.
+A fake-Kiro PTY regression accepts an optional older host binary to verify this
+boundary, forwards native Ctrl+G and Ctrl+B d unchanged, checks IXON is disabled,
+and detaches with Ctrl+Q while preserving the Kiro PID:
+`python3 tests/terminal_smoke.py target/debug/kiro-agents /path/to/v0.4.2/kiro-agents`.
+Already running frontends retain their executable until exit; installer replacement
+applies to subsequent launches. SSH-client shortcut acceptance remains manual.
