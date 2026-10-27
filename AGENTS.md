@@ -191,7 +191,8 @@ EOF regression runs in make check and against extracted betas. Native title owne
 may use a bounded, start-time-checked descendant parent chain; main-thread children
 lists alone miss Kiro's runtime-thread launcher chain. See docs/INCIDENT-2026-10-26-CPU.md.
 
-Workspace mouse wheel events send PageUp/PageDown to the hovered pane, never Up/Down
-prompt-history keys. Enable/report mouse only on the private workspace server and
-preserve tmux copy-mode wheel behavior. Keep real-client SGR wheel regression coverage;
-do not change direct native attach wheel/PageUp byte passthrough.
+Workspace primary-screen scrolling belongs to tmux's scrollback buffer: wheel and
+PageUp enter/scroll copy mode, not prompt-history or injected page keys. Preserve
+native mouse events for applications that request them and native page keys for
+alternate-screen applications. Test actual viewport movement and no input leakage,
+not only echoed key bytes. Do not change direct native attach passthrough.

@@ -276,14 +276,16 @@ impl TmuxWorkspace {
     fn configure_server(&self) -> Result<()> {
         let board = self.pane_command(false)?;
         let shell = self.pane_command(true)?;
-        // Capture wheel events before the outer terminal translates alternate-screen
-        // scrolling into Up/Down (prompt history). Page the hovered pane instead.
+        // Primary-screen applications rely on terminal scrollback, not injected
+        // editing keys. Tmux owns that buffer inside a workspace. Only forward
+        // mouse events when the application actually requested them.
         self.run(
             &["set-option", "-g", "mouse", "on"],
             "Could not enable workspace mouse input",
         )?;
-        for (wheel, key) in [("WheelUpPane", "PPage"), ("WheelDownPane", "NPage")] {
-            let page = format!("send-keys -t = {key}");
+        let page_up = r##"if-shell -F -t = "#{pane_in_mode}" "send-keys -X -t = page-up" "copy-mode -e -u -t =""##;
+        let page_down = r##"if-shell -F -t = "#{pane_in_mode}" "send-keys -X -t = page-down""##;
+        for (wheel, scroll) in [("WheelUpPane", page_up), ("WheelDownPane", page_down)] {
             self.run(
                 &[
                     "bind-key",
@@ -294,13 +296,40 @@ impl TmuxWorkspace {
                     "-F",
                     "-t",
                     "=",
-                    "#{pane_in_mode}",
+                    "#{&&:#{mouse_any_flag},#{!:#{pane_in_mode}}}",
                     "send-keys -M -t =",
-                    &page,
+                    scroll,
                 ],
                 "Could not set workspace wheel paging",
             )?;
         }
+        self.run(
+            &[
+                "bind-key",
+                "-T",
+                "root",
+                "PPage",
+                "if-shell",
+                "-F",
+                "#{alternate_on}",
+                "send-keys PPage",
+                "copy-mode -e -u",
+            ],
+            "Could not set workspace PageUp scrollback",
+        )?;
+        self.run(
+            &[
+                "bind-key",
+                "-T",
+                "root",
+                "NPage",
+                "if-shell",
+                "-F",
+                "#{alternate_on}",
+                "send-keys NPage",
+            ],
+            "Could not set workspace PageDown handling",
+        )?;
         for (key, command, direction, program) in [
             ("%", "split-window", "-h", &board),
             ("\"", "split-window", "-v", &board),

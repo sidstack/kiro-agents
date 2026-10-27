@@ -74,3 +74,10 @@ Wheel follow-up: enable mouse reporting on the private server and translate whee
 up/down to PageUp/PageDown for the hovered pane, preserving tmux copy mode. The PTY
 regression sends real SGR mouse input and rejects history-arrow bytes and delivery
 to the wrong pane. Direct sessions retain native wheel passthrough.
+
+Scrolling correction: user testing rejected the key-forwarding approach. Primary
+screen wheel/PageUp now scroll tmux's retained buffer; PageDown returns toward live
+output and q exits copy mode. Native mouse/full-screen page handling remains native.
+Regression acceptance now requires actual viewport movement with numbered history,
+rather than echoed escape bytes. The existing private server received only the new
+scroll bindings; pane processes were preserved.

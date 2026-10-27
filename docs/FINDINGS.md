@@ -238,3 +238,14 @@ wheel up/down to PageUp/PageDown in the hovered pane. Copy-mode wheel events rem
 with tmux; direct attached input handling is unchanged. A real tmux client PTY test
 sends SGR wheel events and verifies page-key bytes, no history arrows, correct pane
 targeting, and copy-mode isolation. Browser/Guacamole acceptance remains manual.
+
+The page-key forwarding fix did not resolve the user's real session. Read-only
+workspace metadata showed primary-screen panes (`alternate_on=0`) with no native
+mouse request (`mouse_any_flag=0`). The previous fixture only proved delivery of
+PageUp/PageDown bytes; it did not prove scrolling. In this mode the scrollback
+belongs to tmux, so forwarding keys into Kiro is the wrong layer. Wheel and
+primary-screen PageUp now operate on tmux copy mode. Native mouse-requesting/full-screen
+applications retain their input paths. The regression produces a numbered retained
+history, requires positive/decreasing scroll positions, verifies the correct pane,
+and checks that scrollback navigation injects no prompt keys. Browser acceptance
+still requires the user's confirmation; fake byte echo alone is not acceptance.

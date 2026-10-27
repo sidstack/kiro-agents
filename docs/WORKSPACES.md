@@ -56,11 +56,13 @@ for dashboard navigation instead of Kiro's native crew monitor. Left Arrow passe
 through unchanged, including when the native editor is empty. Zoom only changes
 presentation, never session ownership.
 
-Mouse wheel up/down sends PageUp/PageDown to the hovered pane, rather than Up/Down
-prompt-history keys. Mouse reporting is enabled only in this private tmux server.
-For tmux's own scrollback (including plain shell panes), use Ctrl+B [; wheel input
-in copy mode keeps tmux's normal behavior. Direct non-workspace sessions retain
-their native wheel/PageUp passthrough.
+Mouse wheel up/down scrolls the hovered pane's retained terminal output. For
+primary-screen Kiro, PageUp enters tmux scrollback and PageDown moves toward the
+live view; q exits scrollback. These keys are not injected into the prompt.
+Applications that request mouse reporting receive their native mouse events;
+full-screen alternate-screen applications retain native PageUp/PageDown. Ctrl+B [
+also opens tmux scrollback, including for plain shell panes. Direct non-workspace
+sessions retain their native wheel/PageUp passthrough.
 
 Closing a Kiro pane closes the attached frontend while its managed Kiro process stays
 alive. Closing a shell pane terminates that pane's shell as tmux normally does. Closing

@@ -177,17 +177,49 @@ def main():
             cli('workspace', 'close', 'alternate')
             assert len(panes()) == 2, 'reopening workspace created extra panes'
             assert tmux('show-options', '-gv', 'mouse').strip() == 'on'
-            # Real SGR wheel input must page the hovered (not focused) Kiro pane.
-            # Never use send-keys here: it bypasses tmux's mouse bindings.
+            # Kiro's primary-screen history belongs to tmux. Echoed page-key
+            # bytes are not evidence of scrolling; require a moved viewport.
             tmux('select-pane', '-t', first)
+            tmux('send-keys', '-t', second, '-l', 'history')
+            wait(lambda: 'SCROLL_END' in capture(second), 'fixture did not produce scrollback')
+            assert int(tmux('display-message', '-p', '-t', second, '#{history_size}')) > 0
             x, y = map(int, tmux('display-message', '-p', '-t', second, '#{pane_left} #{pane_top}').split())
             def received(pane):
                 return ''.join(re.findall(r'BYTES:([0-9a-f]+)', ''.join(capture(pane).split())))
-            for button, expected in [(64, '1b5b357e'), (65, '1b5b367e')]:
-                press(f'\x1b[<{button};{x + 3};{y + 3}M'.encode())
-                wait(lambda: expected in received(second), 'mouse wheel did not reach hovered Kiro as PageUp/PageDown')
-                assert expected not in received(first), 'wheel input reached focused pane instead of hovered pane'
+            def scroll_position(pane):
+                return int(tmux('display-message', '-p', '-t', pane, '#{scroll_position}').strip() or '0')
+            press(f'\x1b[<64;{x + 3};{y + 3}M'.encode())
+            wait(lambda: tmux('display-message', '-p', '-t', second, '#{pane_in_mode}').strip() == '1', 'wheel did not enter hovered pane scrollback')
+            wait(lambda: int(tmux('display-message', '-p', '-t', second, '#{scroll_position}')) > 0, 'wheel did not move viewport')
+            assert tmux('display-message', '-p', '-t', first, '#{pane_in_mode}').strip() == '0', 'wheel scrolled wrong pane'
+            assert '1b5b357e' not in received(second), 'wheel injected PageUp into prompt'
             assert '1b5b41' not in received(second) and '1b5b42' not in received(second), 'wheel became prompt-history arrows'
+            before = scroll_position(second)
+            press(f'\x1b[<65;{x + 3};{y + 3}M'.encode())
+            wait(lambda: scroll_position(second) < before, 'wheel down did not move viewport down')
+            tmux('select-pane', '-t', second)
+            if tmux('display-message', '-p', '-t', second, '#{pane_in_mode}').strip() == '1':
+                press(b'q')
+            press(b'\x1b[5~')
+            wait(lambda: tmux('display-message', '-p', '-t', second, '#{pane_in_mode}').strip() == '1', 'PageUp did not enter scrollback')
+            before = int(tmux('display-message', '-p', '-t', second, '#{scroll_position}'))
+            assert before > 0
+            press(b'\x1b[6~')
+            wait(lambda: scroll_position(second) < before, 'PageDown did not move viewport down')
+            if tmux('display-message', '-p', '-t', second, '#{pane_in_mode}').strip() == '1':
+                press(b'q')
+            # A full-screen application that requests mouse reporting keeps its
+            # native mouse and paging keys; do not force it into copy mode.
+            tmux('send-keys', '-t', second, '-l', 'screen')
+            wait(lambda: 'NATIVE' in capture(second), 'fixture did not enter native mouse mode')
+            for key, expected in [(b'\x1b[5~', '1b5b357e'), (b'\x1b[6~', '1b5b367e')]:
+                press(key)
+                wait(lambda: expected in received(second), 'native full-screen page key was intercepted')
+            press(f'\x1b[<64;{x + 3};{y + 3}M'.encode())
+            wait(lambda: '1b5b3c3634' in received(second), 'native application mouse wheel was intercepted')
+            assert tmux('display-message', '-p', '-t', second, '#{pane_in_mode}').strip() == '0'
+            tmux('send-keys', '-t', second, '-l', 'leave')
+            wait(lambda: 'LEFT' in capture(second), 'fixture did not leave native mouse mode')
             tmux('select-pane', '-t', first)
             press(b'\x02z')
             wait(lambda: tmux('display-message', '-p', '-t', first, '#{window_zoomed_flag}').strip() == '1', 'prefix z did not zoom')
