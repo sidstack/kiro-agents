@@ -108,7 +108,14 @@ are skipped. All discovered matches remain scrollable, with no top-40 cutoff.
 Scans stop at 100,000 directories, 500,000 filesystem entries, or 15 seconds and
 show a limit notice; unreadable directories are skipped. Cache failures fall back
 to discovery without blocking the picker. Ctrl+K asks before stopping the selected live
-session. F2 names a session; an empty name restores its automatic title. The board
+session. Press **m** on a live session for **Move here**, then **y** to confirm
+(**n/Esc** cancels). Enter on an already attached session also offers this choice.
+The other updated frontend detaches to its dashboard or shell; the same Kiro
+process continues here. `kiro-agents attach ID --move` is the explicit CLI equivalent.
+No store migration or host restart is involved. A frontend from an older release
+must be detached and reopened once with the updated binary before it can accept
+a move; unsupported/stale registrations leave its attachment untouched.
+F2 names a session; an empty name restores its automatic title. The board
 prefers a manual name, then an exactly matched native Kiro title, a short first-prompt
 title, and directory/agent plus a unique ID as the fallback. F2 names work even with an
 older running host. Automatic SQLite TUI titles are not supported until a verified

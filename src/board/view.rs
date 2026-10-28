@@ -115,12 +115,12 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
     let (select_line, actions_line) = if popup {
         (
             "↑/↓ j/k select · Enter focus · v split right · h split below · w new window",
-            "Ctrl+N new · F2 rename · Ctrl+K stop · / search · r refresh · Esc closes popup",
+            "Ctrl+N new · m move here · F2 rename · Ctrl+K stop · / search · Esc closes popup",
         )
     } else {
         (
             "↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh",
-            "Ctrl+N create · F2 rename · Ctrl+K stop · q/Ctrl+Q quit",
+            "Ctrl+N create · m move here · F2 rename · Ctrl+K stop · q/Ctrl+Q quit",
         )
     };
     frame.render_widget(
@@ -136,6 +136,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
         mode,
         Mode::Directory(_)
             | Mode::Agent { .. }
+            | Mode::Move(_)
             | Mode::Stop(_)
             | Mode::Rename { .. }
             | Mode::Placement { .. }
@@ -262,6 +263,10 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
         }
         Mode::Placement { flow, selected } => {
             let (title, context) = match flow {
+                PlacementFlow::Move { id, cwd } => (
+                    "Move session to this workspace",
+                    format!("{id}\nDirectory: {cwd}"),
+                ),
                 PlacementFlow::Existing { id, cwd } => (
                     "Place session in the workspace",
                     format!("{id}\nDirectory: {cwd}"),
@@ -309,6 +314,17 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
                 Paragraph::new(format!("{id}\nName: {query}\n\nEnter saves · empty name restores automatic title\nCtrl+U clears · Esc cancels\n{message}"))
                     .wrap(Wrap { trim: false }), area);
             input_cursor(frame, area, "Name: ", query, 1);
+        }
+        Mode::Move(id) => {
+            let move_area = modal(frame, "Move session here? y/n");
+            let action = if popup {
+                "y chooses a destination pane"
+            } else {
+                "y moves here"
+            };
+            frame.render_widget(
+                Paragraph::new(format!("{id}\nDetaches the other terminal; its dashboard or shell returns.\nThe same Kiro process keeps running.\n{action} · n/Esc cancels"))
+                    .wrap(Wrap { trim: false }), move_area);
         }
         Mode::Stop(id) => {
             let area = modal(frame, "Stop session? y/n");
@@ -452,6 +468,10 @@ mod tests {
                 20,
                 false
             )
+        );
+        insta::assert_snapshot!(
+            "move",
+            render(&board, &Mode::Move("session-one".into()), 100, 20, false)
         );
         insta::assert_snapshot!(
             "stop",

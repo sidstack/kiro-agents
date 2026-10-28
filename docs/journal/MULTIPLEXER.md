@@ -101,3 +101,11 @@ workaround, not a claim that ordinary wheel scrolling is fixed for every termina
   cross-window focus with stable Kiro PIDs, and legacy shortcut cleanup. The broad
   workspace suite retains viewport scrolling, native mouse/page/arrow passthrough,
   shells, prefix keys, zoom/resize, frontend exit and foreign-server isolation.
+
+### Explicit attachment moves between standalone and workspace
+
+- [x] Share existing host/registry; keep historical-store import deferred.
+- [x] Add m/confirmation/placement for moving a live attachment into this workspace.
+- [x] Preserve the destination's current pane and focus self-moves without replacement.
+- [x] Close the source session-only frontend normally without stopping Kiro.
+- [x] PTY-test standalone/workspace round trips, cancellation and stable child PIDs.

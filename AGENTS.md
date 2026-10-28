@@ -206,3 +206,10 @@ while refreshing, and make Ctrl+R force a rescan. Preserve explicit paths and
 selection-only creation. Discovery excludes hidden/dependency/build trees and
 symlinks, has directory/entry/time bounds, and never requires fd/fzf. Cache tests
 must isolate HOME/state and cover TTL, force, corrupt-file recovery and permissions.
+
+Live session moves are cooperative frontend handoffs, not native history resume or
+host takeover. `m` + confirmation / `attach ID --move` releases only an updated
+frontend through a private token-checked lease/socket, then uses ordinary Attach.
+Never signal or kill a source process, restart the host, or change the host protocol
+for this feature. Preserve exclusive attachment, bounded release waits, old-peer
+refusal, native child PID, and token-checked cleanup of successor registrations.

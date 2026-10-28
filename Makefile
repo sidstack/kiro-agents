@@ -5,6 +5,7 @@ check:
 	cargo test
 	cargo build --locked
 	python3 tests/terminal_smoke.py
+	python3 tests/board_move.py
 	python3 tests/board_smoke.py
 	python3 tests/board_errors.py
 	python3 tests/board_handoff.py

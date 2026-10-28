@@ -20,4 +20,4 @@ Cannot attach: session is exited (exit 0). Use Kiro history manually or Ctrl+N f
 
 
 ↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh
-Ctrl+N create · F2 rename · Ctrl+K stop · q/Ctrl+Q quit
+Ctrl+N create · m move here · F2 rename · Ctrl+K stop · q/Ctrl+Q quit

@@ -13,6 +13,7 @@ import sys
 import tempfile
 import termios
 import time
+from board_smoke import Board
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / 'target/debug/kiro-agents'
@@ -67,6 +68,7 @@ def main():
         for key in ['TMUX', 'TMUX_PANE', 'KIRO_AGENTS_WORKSPACE_SOCKET', 'KIRO_AGENTS_WORKSPACE_CLIENT']:
             env.pop(key, None)
         client = master = None
+        standalone = None
         frames = bytearray()
 
         def cli(*args):
@@ -188,12 +190,55 @@ def main():
             wait(lambda: popup() is None, 'creation did not close dashboard')
             assert len(panes()) == 4 and len(json.loads(cli('status', '--json'))) == 4
             assert int(tmux('display-message', '-p', '-t', below, '#{pane_top}')) > int(tmux('display-message', '-p', '-t', second, '#{pane_top}'))
+            # Move an attachment out of tmux without stopping its native child.
+            standalone = Board(env)
+            standalone.search(rows[0]['id'])
+            standalone.press(b'm')
+            standalone.wait(b'Move session here?')
+            standalone.press(b'n')
+            assert session_pane(rows[0]['id']) == first, 'cancel changed workspace attachment'
+            standalone.frames = b''
+            standalone.press(b'm')
+            standalone.press(b'y')
+            standalone.wait(b'READY:')
+            wait(lambda: session_pane(rows[0]['id']) is None, 'old workspace attachment stayed open')
+            wait(lambda: not Path(f'/proc/{first_frontend}').exists(), 'source frontend did not exit')
+            standalone.frames = b''
+            # Bring it back via the popup, choosing its destination before release.
+            origin_frontend = tmux('display-message', '-p', '-t', below, '#{pane_pid}').strip()
+            open_dashboard()
+            choose(rows[0]['id'], b'm')
+            press(b'y')
+            # Esc at placement must preserve the standalone attachment.
+            press(b'\x1b')
+            assert session_pane(rows[0]['id']) is None
+            choose(rows[0]['id'], b'm')
+            press(b'y')
+            press(b'v')
+            moved = wait(lambda: session_pane(rows[0]['id']), 'standalone session did not move into workspace')
+            wait(lambda: popup() is None and current() == moved, 'moved pane was not focused')
+            standalone.wait(b'Kiro sessions')
+            assert tmux('display-message', '-p', '-t', below, '#{pane_pid}').strip() == origin_frontend, 'move replaced the active origin pane'
+            # Moving the current pane to itself is a focus, not self-replacement.
+            count = len(panes())
+            moved_pid = tmux('display-message', '-p', '-t', moved, '#{pane_pid}').strip()
+            open_dashboard()
+            choose(rows[0]['id'], b'm')
+            press(b'y')
+            press(b'v')
+            wait(lambda: popup() is None, 'self move did not dismiss popup')
+            assert len(panes()) == count
+            assert tmux('display-message', '-p', '-t', moved, '#{pane_pid}').strip() == moved_pid
+            standalone.finish()
+            standalone = None
             after = {row['id']: row['pid'] for row in json.loads(cli('status', '--json'))}
             assert {key: after[key] for key in original} == original, 'navigation respawned a Kiro process'
             for pid in original.values():
                 os.kill(pid, 0)
-            print('PASS: centered popup without tile, Esc preservation, empty launcher fill, right split/new window, focus existing/cross-window sessions and stable Kiro PIDs')
+            print('PASS: centered popup without tile, Esc preservation, empty launcher fill, right split/new window, focus existing/cross-window sessions, standalone/workspace round-trip moves and stable Kiro PIDs')
         finally:
+            if standalone is not None:
+                standalone.close()
             tmux('kill-server', check=False)
             if client is not None:
                 deadline = time.monotonic() + 2

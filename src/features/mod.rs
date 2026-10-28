@@ -74,6 +74,12 @@ pub trait WorkspaceFeature: Send + Sync {
         cwd: &std::path::Path,
         placement: PanePlacement,
     ) -> anyhow::Result<()>;
+    fn move_session(
+        &self,
+        id: &str,
+        cwd: &std::path::Path,
+        placement: PanePlacement,
+    ) -> anyhow::Result<()>;
     fn register_attachment(&self, id: &str)
         -> anyhow::Result<Option<Box<dyn WorkspaceAttachment>>>;
     fn open(&self, name: &str, cwd: &std::path::Path, detached: bool) -> anyhow::Result<()>;

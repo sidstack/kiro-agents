@@ -431,6 +431,9 @@ impl WorkspaceFeature for TmuxWorkspace {
     fn open_session(&self, id: &str, cwd: &Path, placement: PanePlacement) -> Result<()> {
         self.place_session(id, cwd, placement)
     }
+    fn move_session(&self, id: &str, cwd: &Path, placement: PanePlacement) -> Result<()> {
+        self.place_session_move(id, cwd, placement)
+    }
     fn register_attachment(&self, id: &str) -> Result<Option<Box<dyn WorkspaceAttachment>>> {
         self.track_attachment(id)
     }

@@ -32,6 +32,7 @@ enum Mode {
         directory: DirPicker,
         picker: AgentPicker,
     },
+    Move(String),
     Stop(String),
     Rename {
         id: String,
@@ -46,6 +47,10 @@ enum Mode {
 /// What a confirmed pane placement applies to: an existing live session row or
 /// a pending creation whose directory/agent forms stay available behind Esc.
 enum PlacementFlow {
+    Move {
+        id: String,
+        cwd: String,
+    },
     Existing {
         id: String,
         cwd: String,
@@ -62,6 +67,12 @@ enum Effect {
     Quit,
     Refresh,
     Attach(String),
+    Move(String),
+    MovePlaced {
+        id: String,
+        cwd: String,
+        placement: PanePlacement,
+    },
     Create {
         cwd: String,
         agent: Option<String>,
@@ -185,6 +196,14 @@ impl App {
                 KeyCode::Esc if self.popup => return Some(Effect::Quit),
                 KeyCode::Esc => self.board.set_query(String::new()),
                 KeyCode::Char('r') => return Some(Effect::Refresh),
+                KeyCode::Char('m') => {
+                    if let Some(row) = self.board.selected().filter(|row| row.state == "live") {
+                        self.mode = Mode::Move(row.id.clone());
+                        self.message.clear();
+                    } else {
+                        self.message = "Only a live session can move between terminals.".into();
+                    }
+                }
                 KeyCode::Char(ch @ ('v' | 'h' | 'w')) if self.popup => {
                     if let Some(row) = self.board.selected().filter(|row| row.state == "live") {
                         let placement = match ch {
@@ -321,7 +340,7 @@ impl App {
             Mode::Placement { flow, selected } => match key.code {
                 KeyCode::Esc => {
                     let back = match flow {
-                        PlacementFlow::Existing { .. } => Mode::Browse,
+                        PlacementFlow::Existing { .. } | PlacementFlow::Move { .. } => Mode::Browse,
                         PlacementFlow::Create {
                             directory, picker, ..
                         } => Mode::Agent {
@@ -343,6 +362,11 @@ impl App {
                     };
                     let placement = PLACEMENTS[index].1;
                     let effect = match flow {
+                        PlacementFlow::Move { id, cwd } => Effect::MovePlaced {
+                            id: id.clone(),
+                            cwd: cwd.clone(),
+                            placement,
+                        },
                         PlacementFlow::Existing { id, cwd } => Effect::Open {
                             id: id.clone(),
                             cwd: cwd.clone(),
@@ -385,6 +409,15 @@ impl App {
                         name,
                     });
                 }
+                _ => (),
+            },
+            Mode::Move(id) => match key.code {
+                KeyCode::Char('y' | 'Y') => {
+                    let id = id.clone();
+                    self.mode = Mode::Browse;
+                    return Some(Effect::Move(id));
+                }
+                KeyCode::Char('n' | 'N') | KeyCode::Esc => self.mode = Mode::Browse,
                 _ => (),
             },
             Mode::Stop(id) => match key.code {
@@ -627,9 +660,33 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
                     dirty = true;
                 }
             }
-            Some(Effect::Open { id, cwd, placement }) => {
+            Some(Effect::Move(id)) if app.popup => {
+                if let Some(row) = app.board.rows.iter().find(|row| row.id == id) {
+                    app.mode = Mode::Placement {
+                        flow: PlacementFlow::Move {
+                            id,
+                            cwd: row.cwd.clone(),
+                        },
+                        selected: default_placement_index(),
+                    };
+                    app.message.clear();
+                }
+                dirty = true;
+            }
+            Some(effect @ (Effect::Open { .. } | Effect::MovePlaced { .. })) => {
+                let move_here = matches!(&effect, Effect::MovePlaced { .. });
+                let (id, cwd, placement) = match effect {
+                    Effect::Open { id, cwd, placement }
+                    | Effect::MovePlaced { id, cwd, placement } => (id, cwd, placement),
+                    _ => unreachable!(),
+                };
                 if let Some(navigator) = navigator {
-                    match navigator.open_session(&id, Path::new(&cwd), placement) {
+                    let result = if move_here {
+                        navigator.move_session(&id, Path::new(&cwd), placement)
+                    } else {
+                        navigator.open_session(&id, Path::new(&cwd), placement)
+                    };
+                    match result {
                         Ok(()) => return Ok(()),
                         Err(error) => {
                             app.message = format!("Workspace placement failed: {error:#}");
@@ -676,9 +733,10 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
                     dirty = true;
                 }
             }
-            Some(effect @ (Effect::Attach(_) | Effect::Create { .. })) => {
+            Some(effect @ (Effect::Attach(_) | Effect::Move(_) | Effect::Create { .. })) => {
+                let move_here = matches!(&effect, Effect::Move(_));
                 let id = match effect {
-                    Effect::Attach(id) => Some(id),
+                    Effect::Attach(id) | Effect::Move(id) => Some(id),
                     Effect::Create { cwd, agent } => {
                         app.message = "Starting native Kiro…".into();
                         screen.terminal.draw(|frame| {
@@ -708,17 +766,35 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
                 if let Some(id) = id {
                     app.message.clear();
                     let mut handed_off = false;
-                    let result =
-                        attach::run_from_board(dir, id, signals.interrupted.clone(), || {
-                            screen.prepare_native()?;
-                            handed_off = true;
-                            Ok(())
-                        });
+                    let on_handoff = || {
+                        screen.prepare_native()?;
+                        handed_off = true;
+                        Ok(())
+                    };
+                    let result = if move_here {
+                        attach::run_from_board_move(
+                            dir,
+                            id.clone(),
+                            signals.interrupted.clone(),
+                            on_handoff,
+                        )
+                    } else {
+                        attach::run_from_board(
+                            dir,
+                            id.clone(),
+                            signals.interrupted.clone(),
+                            on_handoff,
+                        )
+                    };
                     if handed_off {
                         screen.resume()?;
                     }
                     if let Err(error) = result {
-                        app.message = format!("Attach failed: {error:#}");
+                        if !move_here && attach::is_attached_elsewhere(&error) {
+                            app.mode = Mode::Move(id);
+                        } else {
+                            app.message = format!("Attach failed: {error:#}");
+                        }
                     }
                     if signals.interrupted.load(Ordering::Relaxed) {
                         break;
@@ -822,6 +898,27 @@ mod tests {
         assert!(
             matches!(app.key(key(KeyCode::Char('y'))), Some(Effect::Stop(id)) if id == "selected")
         );
+    }
+
+    #[test]
+    fn move_is_explicit_cancellable_and_only_for_live_sessions() {
+        let mut app = app("live");
+        assert!(app.key(key(KeyCode::Char('m'))).is_none());
+        assert!(matches!(app.mode, Mode::Move(_)));
+        app.key(key(KeyCode::Esc));
+        assert!(matches!(app.mode, Mode::Browse));
+        app.key(key(KeyCode::Char('m')));
+        app.key(key(KeyCode::Char('n')));
+        assert!(matches!(app.mode, Mode::Browse));
+        app.key(key(KeyCode::Char('m')));
+        assert!(
+            matches!(app.key(key(KeyCode::Char('y'))), Some(Effect::Move(id)) if id == "selected")
+        );
+        assert!(matches!(app.mode, Mode::Browse));
+        app.board.rows[0].state = "exited".into();
+        app.key(key(KeyCode::Char('m')));
+        assert!(matches!(app.mode, Mode::Browse));
+        assert!(app.message.contains("Only a live"));
     }
 
     #[test]

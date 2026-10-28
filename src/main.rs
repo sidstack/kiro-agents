@@ -45,7 +45,12 @@ enum Command {
         no_attach: bool,
     },
     /// Reconnect to the same live process
-    Attach { id: String },
+    Attach {
+        id: String,
+        /// Move the attachment from another updated frontend; Kiro keeps running
+        #[arg(long = "move")]
+        move_here: bool,
+    },
     /// List metadata; no transcript is stored
     Status {
         #[arg(long)]
@@ -74,7 +79,11 @@ enum Command {
     #[command(name = "__workspace-board", hide = true)]
     WorkspaceBoard,
     #[command(name = "__workspace-session", hide = true)]
-    WorkspaceSession { id: String },
+    WorkspaceSession {
+        id: String,
+        #[arg(long = "move")]
+        move_here: bool,
+    },
     #[command(name = "__workspace-home", hide = true)]
     WorkspaceHome,
 }
@@ -160,7 +169,13 @@ fn main() -> Result<()> {
             let feature = kiro_agents::workspace_feature()?;
             board::run_popup(&dir, feature.as_ref())
         }
-        Command::WorkspaceSession { id } => attach::run(&dir, id),
+        Command::WorkspaceSession { id, move_here } => {
+            if move_here {
+                attach::run_move(&dir, id)
+            } else {
+                attach::run(&dir, id)
+            }
+        }
         Command::WorkspaceHome => {
             anyhow::ensure!(
                 kiro_agents::workspace_context()?.is_some(),
@@ -231,7 +246,13 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Command::Attach { id } => attach::run(&dir, id),
+        Command::Attach { id, move_here } => {
+            if move_here {
+                attach::run_move(&dir, id)
+            } else {
+                attach::run(&dir, id)
+            }
+        }
         Command::Status { json } => {
             let rows = sessions(&dir)?;
             if json {

@@ -272,14 +272,40 @@ impl TmuxWorkspace {
         cwd: &Path,
         placement: PanePlacement,
     ) -> Result<()> {
+        self.place_session_impl(id, cwd, placement, false)
+    }
+
+    pub(super) fn place_session_move(
+        &self,
+        id: &str,
+        cwd: &Path,
+        placement: PanePlacement,
+    ) -> Result<()> {
+        self.place_session_impl(id, cwd, placement, true)
+    }
+
+    fn place_session_impl(
+        &self,
+        id: &str,
+        cwd: &Path,
+        placement: PanePlacement,
+        move_here: bool,
+    ) -> Result<()> {
         validate_session(id)?;
         let cwd = directory(cwd)?;
         let _lock = self.setup_lock()?;
-        if self.navigate_existing(id)? {
+        if !move_here && self.navigate_existing(id)? {
             return Ok(());
         }
         let (origin, window) = self.owned_pane()?;
         let origin_pid: u32 = self.pane_value(&origin, "pane_pid")?.parse()?;
+        if move_here
+            && self.pane_value(&origin, SESSION)? == id
+            && foreground_frontend(&self.pane_value(&origin, FRONTEND)?, origin_pid)
+        {
+            self.navigate_existing(id)?;
+            return Ok(());
+        }
         let empty = placement != PanePlacement::Window
             && process_token(origin_pid).as_deref()
                 == Some(self.pane_value(&origin, EMPTY)?.as_str());
@@ -308,7 +334,11 @@ impl TmuxWorkspace {
             &["set-option", "-p", "-t", &pane, "remain-on-exit", "on"],
             "Could not prepare session pane",
         )?;
-        let command = self.app_command(&["__workspace-session", id], &[])?;
+        let command = if move_here {
+            self.app_command(&["__workspace-session", id, "--move"], &[])?
+        } else {
+            self.app_command(&["__workspace-session", id], &[])?
+        };
         if let Err(error) = self.run(
             &[
                 "respawn-pane",
@@ -328,7 +358,7 @@ impl TmuxWorkspace {
         }
         let pid: u32 = self.pane_value(&pane, "pane_pid")?.parse()?;
         let token = process_token(pid).unwrap_or_else(|| format!("ended:{pid}"));
-        let deadline = Instant::now() + Duration::from_secs(6);
+        let deadline = Instant::now() + Duration::from_secs(if move_here { 15 } else { 6 });
         while Instant::now() < deadline {
             if self.pane_value(&pane, SESSION).ok().as_deref() == Some(id)
                 && self.pane_value(&pane, FRONTEND).ok().as_deref() == Some(&token)
@@ -362,7 +392,7 @@ impl TmuxWorkspace {
                 let _ = self.output(&["kill-pane", "-t", &pane]);
             }
         }
-        anyhow::bail!("Could not attach the session pane. It may be open in another terminal or an older frontend. Reattach it once with the updated frontend; no attachment was stolen.")
+        anyhow::bail!("Could not attach the session pane. If it is open elsewhere, press Esc then m to move it here. Older source frontends must be detached and reopened once with the updated binary; Kiro stays running and no host restart is needed.")
     }
 }
 

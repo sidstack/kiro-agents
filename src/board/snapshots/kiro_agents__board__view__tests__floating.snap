@@ -20,4 +20,4 @@ expression: "render(&board, &Mode::Browse, 100, 20, true)"
 Enter focuses this session · v split right · h split below · w new window
 
 ↑/↓ j/k select · Enter focus · v split right · h split below · w new window
-Ctrl+N new · F2 rename · Ctrl+K stop · / search · r refresh · Esc closes popup
+Ctrl+N new · m move here · F2 rename · Ctrl+K stop · / search · Esc closes popup
