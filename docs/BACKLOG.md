@@ -117,3 +117,13 @@ bounds. CI uses synthetic conversations and fake Kiro; no real auth/transcripts/
 5. Merge/release only after compatibility and behavioral gates pass; unknown formats
    remain visibly unsupported. Never add history/resume claims to shipped documentation
    before both generation paths are actually implemented and verified.
+
+
+## 2026-10-28 scope update
+
+The user requested stopped/historical resume, the All / Needs you / Working /
+Ready / Inactive dashboard, and configurable inactivity as a new lifecycle batch.
+See [the lifecycle journal](journal/SESSION-LIFECYCLE.md) for the exact contract,
+completed capability checks and unresolved native verification gates. This does
+not add historical import, auto-stop, V3 launches or reliable turn-status claims
+to the shipped multiplexer. Full-text quick-open remains deferred.

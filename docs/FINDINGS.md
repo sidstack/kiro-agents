@@ -352,3 +352,20 @@ generation, or Kiro-owned files. PTY regressions cover consent/cancellation,
 round-trip movement with the same child PID, registration cleanup, refusal of a
 noninteractive destination, and an unregistered older frontend retaining its
 connection. Compatibility is also tested with a published v0.4.2 host.
+## 2026-10-28 — Lifecycle/resume capability investigation
+
+The installed 2.32.0 chat help advertises --resume-id, --resume-picker,
+--list-sessions, --all-cwds, JSON formatting, --v2 and --v3. Empty inventory calls
+for both engines, under independent temporary HOME/KIRO_HOME/KIRO_SESSIONS_DIR
+and XDG roots with stdin closed, did not return JSON within 20 seconds. Their
+owned process groups were killed and reaped; no real authentication or session
+state was copied, and no model prompt was sent. These results establish neither
+an authenticated listing schema nor a specific cause for the timeout.
+
+Native metadata has session_state, but its schema version alone is not an engine
+identifier or a live-turn signal. The existing wrapper's live/stopped metadata
+cannot support honest Working/Ready/Needs-you labels or exact stopped-session
+resume on its own. The Pi reference only unloads hidden settled sessions and
+captures editor drafts through its SDK before disposal. Equivalent draft safety
+must be verified for Kiro before automatic idle stopping. The new batch contract
+and remaining verification gates are in journal/SESSION-LIFECYCLE.md.
