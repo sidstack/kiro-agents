@@ -26,6 +26,13 @@ impl Drop for Attachment {
             .as_deref()
             == Some(&self.token)
         {
+            let _ = self.workspace.output(&[
+                "set-option",
+                "-pu",
+                "-t",
+                &self.pane,
+                "@kiro-agents-title",
+            ]);
             let _ = self
                 .workspace
                 .output(&["set-option", "-pu", "-t", &self.pane, SESSION]);
@@ -195,6 +202,30 @@ impl TmuxWorkspace {
         ) {
             let _ = self.output(&["set-option", "-pu", "-t", &pane, FRONTEND]);
             return Err(error);
+        }
+        if let Ok(crate::protocol::Reply::Sessions(mut rows)) =
+            crate::host::call(&self.state_dir, crate::protocol::Action::Status, false)
+        {
+            let _ = crate::custom_names::enrich(&self.state_dir, &mut rows);
+            if let Some(row) = rows.iter().find(|row| row.id == id) {
+                let title = row
+                    .display_name()
+                    .chars()
+                    .filter(|ch| !ch.is_control())
+                    .take(100)
+                    .collect::<String>();
+                self.run(
+                    &[
+                        "set-option",
+                        "-p",
+                        "-t",
+                        &pane,
+                        "@kiro-agents-title",
+                        &title,
+                    ],
+                    "Could not label session pane",
+                )?;
+            }
         }
         let _ = self.output(&["set-option", "-pu", "-t", &pane, EMPTY]);
         Ok(Some(Box::new(Attachment {

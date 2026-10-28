@@ -66,6 +66,7 @@ pub enum PanePlacement {
 pub trait WorkspaceAttachment {}
 
 pub trait WorkspaceFeature: Send + Sync {
+    fn reload(&self) -> anyhow::Result<()>;
     fn dashboard(&self) -> anyhow::Result<()>;
     fn focus_session(&self, id: &str) -> anyhow::Result<bool>;
     fn open_session(

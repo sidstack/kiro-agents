@@ -275,9 +275,20 @@ impl TmuxWorkspace {
         Ok((id.to_owned(), window.to_owned()))
     }
     // Pass tmux argv directly. Quoting belongs only to the shell command inside a pane.
-    // Focus, resize, zoom, copy mode and detach retain the native default bindings.
+    // Native prefix controls remain available alongside direct workspace bindings.
     fn configure_server(&self) -> Result<()> {
         let shell = self.pane_command(true)?;
+        self.run(
+            &["set-option", "-g", "pane-border-status", "top"],
+            "Could not enable pane labels",
+        )?;
+        self.run(&["set-option", "-g", "pane-border-format", " #{pane_index}: #{?@kiro-agents-title,#{@kiro-agents-title},#{pane_current_command}} "], "Could not configure pane labels")?;
+        for table in ["root", "copy-mode", "copy-mode-vi"] {
+            self.run(
+                &["bind-key", "-T", table, "F11", "resize-pane", "-Z"],
+                "Could not bind workspace fullscreen shortcut",
+            )?;
+        }
         // Primary-screen applications rely on terminal scrollback, not injected
         // editing keys. Tmux owns that buffer inside a workspace. Only forward
         // mouse events when the application actually requested them.
@@ -394,6 +405,32 @@ impl TmuxWorkspace {
             &["set-hook", "-g", "client-attached", &hook],
             "Could not configure the workspace dashboard",
         )?;
+        // Deliberate private user overrides win over wrapper defaults. Never
+        // discover or load the machine's global/user tmux configuration.
+        let config = self.root.join("tmux.conf");
+        match fs::symlink_metadata(&config) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error.into()),
+            Ok(metadata) => {
+                anyhow::ensure!(
+                    metadata.is_file(),
+                    "Workspace tmux.conf must be a regular file"
+                );
+                anyhow::ensure!(
+                    metadata.len() <= 256 * 1024,
+                    "Workspace tmux.conf exceeds 256 KiB"
+                );
+                self.run(
+                    &[
+                        "source-file",
+                        config
+                            .to_str()
+                            .context("Workspace config path must be UTF-8")?,
+                    ],
+                    "Could not load private workspace tmux.conf",
+                )?;
+            }
+        }
         Ok(())
     }
     fn start_session(&self, name: &str, cwd: &str) -> Result<()> {
@@ -422,6 +459,15 @@ impl TmuxWorkspace {
     }
 }
 impl WorkspaceFeature for TmuxWorkspace {
+    fn reload(&self) -> Result<()> {
+        self.ensure_runtime()?;
+        let _lock = self.setup_lock()?;
+        anyhow::ensure!(
+            !self.workspaces()?.is_empty(),
+            "No kiro-agents workspace is running; open one first"
+        );
+        self.configure_server()
+    }
     fn dashboard(&self) -> Result<()> {
         self.show_dashboard(None)
     }

@@ -246,6 +246,17 @@ def main():
             wait(lambda: tmux('display-message', '-p', '-t', first, '#{window_zoomed_flag}').strip() == '1', 'prefix z did not zoom')
             press(b'\x02z')
             wait(lambda: tmux('display-message', '-p', '-t', first, '#{window_zoomed_flag}').strip() == '0', 'prefix z did not unzoom')
+            press(b'\x1b[23~')
+            wait(lambda: tmux('display-message', '-p', '-t', first, '#{window_zoomed_flag}').strip() == '1', 'F11 did not zoom')
+            press(b'\x1b[23~')
+            wait(lambda: tmux('display-message', '-p', '-t', first, '#{window_zoomed_flag}').strip() == '0', 'F11 did not unzoom')
+            assert tmux('show-options', '-gv', 'pane-border-status').strip() == 'top'
+            assert tmux('show-options', '-pv', '-t', first, '@kiro-agents-title').strip()
+            config = state / 'workspaces/tmux.conf'
+            config.write_text('set-option -g @config-test loaded\n')
+            cli('workspace', 'reload')
+            assert tmux('show-options', '-gv', '@config-test').strip() == 'loaded'
+            config.unlink()
             tmux('resize-pane', '-t', first, '-x', '90')
             size = tmux('display-message', '-p', '-t', first, '#{pane_width}x#{pane_height}').strip()
             wait(lambda: f'SIZE:{size}' in capture(first), 'exact resize did not reach fake Kiro')
