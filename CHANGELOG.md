@@ -5,6 +5,13 @@ Conventional Commits by release-please.
 
 ## Local MVP history (before automated releases)
 
+## [0.5.0](https://github.com/sidstack/kiro-agents/compare/v0.4.3...v0.5.0) (2026-10-28)
+
+
+### Features
+
+* add tmux workspaces, floating dashboard and session moves ([#18](https://github.com/sidstack/kiro-agents/issues/18)) ([893ad6b](https://github.com/sidstack/kiro-agents/commit/893ad6b75d0289ed262171a6dc409f6909c491bb))
+
 ## [0.4.3](https://github.com/sidstack/kiro-agents/compare/v0.4.2...v0.4.3) (2026-10-27)
 
 
