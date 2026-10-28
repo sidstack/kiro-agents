@@ -5,6 +5,13 @@ Conventional Commits by release-please.
 
 ## Local MVP history (before automated releases)
 
+## [0.4.3](https://github.com/sidstack/kiro-agents/compare/v0.4.2...v0.4.3) (2026-10-27)
+
+
+### Bug Fixes
+
+* use Ctrl+Q for single-key dashboard navigation ([#22](https://github.com/sidstack/kiro-agents/issues/22)) ([fc713ef](https://github.com/sidstack/kiro-agents/commit/fc713ef6530c642ef1cd896dfdb9bef6a1a3c239))
+
 ## [0.4.2](https://github.com/sidstack/kiro-agents/compare/v0.4.1...v0.4.2) (2026-10-27)
 
 
