@@ -48,6 +48,52 @@ pub fn validate_name(name: &str) -> anyhow::Result<String> {
     Ok(name.to_owned())
 }
 
+/// Optional external terminal workspace; the session host never owns tmux or shell panes.
+#[derive(Debug, Clone, Copy)]
+pub enum SplitDirection {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanePlacement {
+    Right,
+    Below,
+    Window,
+}
+
+/// Dropping a registration removes only this frontend's pane association.
+pub trait WorkspaceAttachment {}
+
+pub trait WorkspaceFeature: Send + Sync {
+    fn dashboard(&self) -> anyhow::Result<()>;
+    fn focus_session(&self, id: &str) -> anyhow::Result<bool>;
+    fn open_session(
+        &self,
+        id: &str,
+        cwd: &std::path::Path,
+        placement: PanePlacement,
+    ) -> anyhow::Result<()>;
+    fn move_session(
+        &self,
+        id: &str,
+        cwd: &std::path::Path,
+        placement: PanePlacement,
+    ) -> anyhow::Result<()>;
+    fn register_attachment(&self, id: &str)
+        -> anyhow::Result<Option<Box<dyn WorkspaceAttachment>>>;
+    fn open(&self, name: &str, cwd: &std::path::Path, detached: bool) -> anyhow::Result<()>;
+    fn split(
+        &self,
+        direction: SplitDirection,
+        terminal: bool,
+        cwd: &std::path::Path,
+    ) -> anyhow::Result<()>;
+    fn window(&self, terminal: bool, cwd: &std::path::Path) -> anyhow::Result<()>;
+    fn list(&self) -> anyhow::Result<String>;
+    fn close(&self, name: &str) -> anyhow::Result<()>;
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

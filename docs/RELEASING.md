@@ -74,7 +74,11 @@ Bot-created PR events can require approval, and token-created tag pushes do not
 start ordinary tag workflows. The release workflow explicitly dispatches Checks,
 Security and Branch beta on its generated PR branch using the built-in GITHUB_TOKEN. GitHub
 permits workflow_dispatch from that token, so no personal access token is needed.
-The binary job is called directly using Release Please's tag output. See
+The binary job is called directly using Release Please's tag output. If GitHub
+marks the generated PR's pull_request runs as requiring approval, a maintainer must
+review/approve those exact runs too: successful dispatched checks do not override an
+approval-required PR suite. Review that only expected version/changelog files changed
+before approving the bot runs and merging. See
 [GitHub's workflow trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
 
 ## Release gates and artifacts

@@ -186,6 +186,30 @@ in CI and was also run against an isolated copy of the actual v0.2.0 executable 
 fake Kiro and temporary HOME/Kiro/XDG/state roots. Manual rename/clear did not alter
 legacy registry metadata or child PIDs, and no unsupported Rename RPC was sent.
 
+## Private tmux workspace probes (2026-10-26)
+
+Isolated tmux 3.4 probes found that dots in session names are silently replaced
+by underscores. Workspace names therefore reject dots rather than losing identity
+between create/list/reopen/close. Tmux expands formats in explicit `-c` directories;
+literal hashes must be escaped there. Stored bindings use tmux's current-directory
+format. Shell commands and tmux argv have different quoting layers; prequoting argv
+values breaks command dispatch and directory selection.
+
+The regression uses private temporary sockets, fake Kiro, a real attached tmux client,
+and executable/state/project paths containing spaces, apostrophes, dollar signs and
+hashes. It checks the actual pane process cwd through `/proc`, since formatted tmux
+path metadata may escape characters. `send-keys` bypasses client prefix handling;
+the PTY client is necessary to verify Ctrl+B Ctrl+B d versus workspace Ctrl+B d.
+No production tmux/Kiro server, native store, authentication or model call is involved.
+
+Shortcut follow-up: the user replaced the doubled-prefix workflow with direct Ctrl+G
+detach. The reference Pi extension can check `ctx.ui.getEditorText()` before consuming
+Left Arrow; the wrapper's native PTY passthrough has no equivalent editor-state signal.
+The user explicitly deferred that shortcut. Left Arrow remains byte passthrough,
+and Ctrl+G was initially an intentional override of Kiro's crew key. This was
+subsequently withdrawn: Ctrl+Q is the current shortcut; see the executable-identity
+follow-up below.
+
 ## CPU incident and verified naming ownership follow-up (2026-10-26)
 
 See [the incident report](INCIDENT-2026-10-26-CPU.md). A bounded isolated reproduction
@@ -205,6 +229,74 @@ had no conversation rows; its descriptor alone did not identify the active sessi
 No auth rows, transcript text or native titles were printed. The real sessions were
 stopped during containment, so the new behavior is verified with isolated delegated
 fake-Kiro fixtures rather than claiming a live authenticated acceptance result.
+
+## Workspace wheel paging (2026-10-27)
+
+The user confirmed native scrolling works outside tmux for the same Kiro session,
+while workspace wheel input cycles prior prompts. The private server previously
+left mouse reporting off, allowing the outer terminal's alternate-screen scrolling
+to generate Up/Down. Workspace configuration now enables mouse reporting and maps
+wheel up/down to PageUp/PageDown in the hovered pane. Copy-mode wheel events remain
+with tmux; direct attached input handling is unchanged. A real tmux client PTY test
+sends SGR wheel events and verifies page-key bytes, no history arrows, correct pane
+targeting, and copy-mode isolation. Browser/Guacamole acceptance remains manual.
+
+The page-key forwarding fix did not resolve the user's real session. Read-only
+workspace metadata showed primary-screen panes (`alternate_on=0`) with no native
+mouse request (`mouse_any_flag=0`). The previous fixture only proved delivery of
+PageUp/PageDown bytes; it did not prove scrolling. In this mode the scrollback
+belongs to tmux, so forwarding keys into Kiro is the wrong layer. Wheel and
+primary-screen PageUp now operate on tmux copy mode. Native mouse-requesting/full-screen
+applications retain their input paths. The regression produces a numbered retained
+history, requires positive/decreasing scroll positions, verifies the correct pane,
+and checks that scrollback navigation injects no prompt keys. Browser acceptance
+still requires the user's confirmation; fake byte echo alone is not acceptance.
+
+## MobaXterm SSH wheel reproduction gap (2026-10-27)
+
+The user confirmed that the same Kiro session scrolls correctly through direct
+kiro-agents, including in MobaXterm over SSH. Workspace PageUp/PageDown work after
+the copy-mode correction, while wheel scrolling remains broken. This is not a
+successful authenticated/client acceptance result; stop changing live bindings
+until the client input is established.
+
+An isolated real-tmux PTY regression now checks both SGR and legacy X10 mouse
+reports: both scroll retained output. Replaying ordinary CSI/SS3 Up sequences
+instead reproduces the prompt-input path without entering scrollback. Tmux may
+normalize the arrow encoding for the child, but cannot know whether it originated
+from a wheel or a keyboard. Do not remap ordinary arrows based on guesses.
+
+A [MobaXterm report with byte-level evidence](https://github.com/anthropics/claude-code/issues/71085)
+describes this arrow substitution even while mouse reporting is enabled. This is
+a candidate explanation, not a capture from the user's exact client/version.
+The opt-in `python3 probes/scroll_input.py` probe compares a normal screen with
+tmux-like alternate/application-cursor/mouse modes over the user's SSH connection.
+It classifies only recognized control events, discards printable input, saves
+no files and restores terminal modes on exit; it never accesses Kiro state. The
+parser self-test and a bounded PTY cleanup/text-discard test passed. Actual
+MobaXterm-client capture remains required before claiming reproduction or resolution.
+
+User capture follow-up: wheel movement produced CSI Up/Down inside tmux and SS3
+Up/Down outside, with unchanged PageUp/PageDown encodings. Both wheel results are
+ordinary arrow events, matching the isolated arrow-substitution reproduction;
+the CSI/SS3 difference is consistent with tmux's cursor-mode normalization. The
+client version and modifier behavior remain unspecified. This does not establish
+that all MobaXterm versions/settings behave the same way or that the issue is fixed.
+
+Upstream search found a [tmux maintainer explanation of this alternate-screen interaction](https://github.com/tmux/tmux/issues/1795)
+and [Mobatek's documented Shift+MouseWheel support for tmux](https://blog.mobatek.net/post/mobaxterm-new-release-8.2/).
+Mobatek also documents [ScrollMod=shift](https://blog.mobatek.net/post/mobaxterm-configuration-settings/).
+These support trying the client modifier before further server key remapping.
+The historical mode-mouse option in the old Mobatek post is obsolete; this private
+server already uses modern mouse=on. Shift+wheel acceptance for this client remains
+unverified. Do not disable alternate-screen support or steal ordinary prompt arrows
+as an automatic compatibility fix.
+
+Manual acceptance follow-up: the user confirmed that Shift+MouseWheel works in the
+current MobaXterm SSH workspace. PageUp/PageDown were already confirmed working.
+Record Shift+wheel as a verified workaround for that setup, not a plain-wheel fix
+or acceptance for every terminal/version. No additional live bindings or native
+arrow-key overrides were needed. The MobaXterm version was not supplied.
 
 ## 2026-10-27 — standalone shortcut and executable identity
 
@@ -228,3 +320,35 @@ and detaches with Ctrl+Q while preserving the Kiro PID:
 `python3 tests/terminal_smoke.py target/debug/kiro-agents /path/to/v0.4.2/kiro-agents`.
 Already running frontends retain their executable until exit; installer replacement
 applies to subsequent launches. SSH-client shortcut acceptance remains manual.
+
+## 2026-10-27 — Recursive directory search and daily cache
+
+Inspection of the previous picker showed that fuzzy ranking was applied only to
+up to 200 immediate children and siblings, then reduced to 40 rows. This could not
+find deeply nested projects or present the complete directory list. The local
+`fdh` reference enumerates directories recursively under `$HOME` before fuzzy
+selection. Discovery now follows that scope in a background worker, with an
+additional cwd root outside home, and retains all discovered matches. Explicit
+paths and current/recent directory choices remain available immediately.
+
+A private, atomically replaced JSON cache records only directory paths and scan
+metadata, keyed by roots, with a rolling 24-hour TTL. Fresh lists are reused across
+frontend launches; expired lists are shown while a replacement is scanned. Ctrl+R
+bypasses the cache. Hidden/dependency/build trees and symlinks are excluded; scans
+have explicit directory, entry and elapsed-time bounds. This is a read-only
+filesystem enumeration, with no Kiro/session-file access or external fd/fzf
+requirement. Model and real-PTY regressions cover deep matching, lists beyond the
+old 200/40 limits, fresh-cache reuse, forced refresh, daily expiry, corrupt-cache
+recovery, and private permissions.
+
+## 2026-10-28 — Shared registry and cooperative attachment moves
+
+Standalone and workspace frontends already address the same host registry via
+`KIRO_AGENTS_HOME`. The observed “already attached” error represents exclusive
+terminal ownership, not separate session stores. Native historical import remains
+out of scope. An explicit frontend-to-frontend release followed by ordinary Attach
+moves the live terminal connection without changing native identity, host RPC,
+generation, or Kiro-owned files. PTY regressions cover consent/cancellation,
+round-trip movement with the same child PID, registration cleanup, refusal of a
+noninteractive destination, and an unregistered older frontend retaining its
+connection. Compatibility is also tested with a published v0.4.2 host.

@@ -22,6 +22,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Open optional tmux workspaces (requires tmux; sessions remain host-owned)
+    Workspace {
+        #[command(subcommand)]
+        command: Option<WorkspaceCommand>,
+    },
     /// Open the session board (plain list when piped)
     Board,
     /// Start a fresh V2 session and attach (Ctrl+Q detaches)
@@ -40,7 +45,12 @@ enum Command {
         no_attach: bool,
     },
     /// Reconnect to the same live process
-    Attach { id: String },
+    Attach {
+        id: String,
+        /// Move the attachment from another updated frontend; Kiro keeps running
+        #[arg(long = "move")]
+        move_here: bool,
+    },
     /// List metadata; no transcript is stored
     Status {
         #[arg(long)]
@@ -66,6 +76,84 @@ enum Command {
     Doctor,
     #[command(name = "__host", hide = true)]
     Host,
+    #[command(name = "__workspace-board", hide = true)]
+    WorkspaceBoard,
+    #[command(name = "__workspace-session", hide = true)]
+    WorkspaceSession {
+        id: String,
+        #[arg(long = "move")]
+        move_here: bool,
+    },
+    #[command(name = "__workspace-home", hide = true)]
+    WorkspaceHome,
+}
+
+#[derive(Subcommand)]
+enum WorkspaceCommand {
+    /// Open the centered session dashboard in this workspace
+    Dashboard,
+    /// Open/create a named workspace; each Kiro pane starts at the session board
+    Open {
+        #[arg(default_value = "main")]
+        name: String,
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+        #[arg(long)]
+        detach: bool,
+    },
+    /// Split the current owned workspace pane; --terminal opens a shell
+    Split {
+        #[arg(long, conflicts_with = "vertical")]
+        horizontal: bool,
+        #[arg(long)]
+        vertical: bool,
+        #[arg(long)]
+        terminal: bool,
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+    },
+    /// Create a window containing a session picker or a terminal
+    Window {
+        #[arg(long)]
+        terminal: bool,
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+    },
+    /// List this application's tmux workspaces
+    List,
+    /// Close a workspace and its panes; managed Kiro sessions keep running
+    Close { name: String },
+}
+
+fn workspace(command: Option<WorkspaceCommand>) -> Result<()> {
+    let feature = kiro_agents::workspace_feature()?;
+    match command.unwrap_or(WorkspaceCommand::Open {
+        name: "main".into(),
+        dir: PathBuf::from("."),
+        detach: false,
+    }) {
+        WorkspaceCommand::Dashboard => feature.dashboard(),
+        WorkspaceCommand::Open { name, dir, detach } => feature.open(&name, &dir, detach),
+        WorkspaceCommand::Split {
+            vertical,
+            terminal,
+            dir,
+            ..
+        } => {
+            let direction = if vertical {
+                kiro_agents::features::SplitDirection::Vertical
+            } else {
+                kiro_agents::features::SplitDirection::Horizontal
+            };
+            feature.split(direction, terminal, &dir)
+        }
+        WorkspaceCommand::Window { terminal, dir } => feature.window(terminal, &dir),
+        WorkspaceCommand::List => {
+            write!(io::stdout(), "{}", feature.list()?)?;
+            Ok(())
+        }
+        WorkspaceCommand::Close { name } => feature.close(&name),
+    }
 }
 
 fn main() -> Result<()> {
@@ -77,6 +165,35 @@ fn main() -> Result<()> {
     let dir = state_dir()?;
     match cli.command.unwrap_or(Command::Board) {
         Command::Host => host::run(dir),
+        Command::WorkspaceBoard => {
+            let feature = kiro_agents::workspace_feature()?;
+            board::run_popup(&dir, feature.as_ref())
+        }
+        Command::WorkspaceSession { id, move_here } => {
+            if move_here {
+                attach::run_move(&dir, id)
+            } else {
+                attach::run(&dir, id)
+            }
+        }
+        Command::WorkspaceHome => {
+            anyhow::ensure!(
+                kiro_agents::workspace_context()?.is_some(),
+                "Open this launcher through a workspace"
+            );
+            writeln!(
+                io::stdout(),
+                "Kiro workspace · Ctrl+Q opens the session dashboard"
+            )?;
+            writeln!(
+                io::stdout(),
+                "Choose a session to fill this empty launcher. Ctrl+B T opens a shell."
+            )?;
+            loop {
+                std::thread::park();
+            }
+        }
+        Command::Workspace { command } => workspace(command),
         Command::Doctor => kiro::doctor(),
         Command::Agents { dir } => kiro::agents(&dir.canonicalize()?),
         Command::New {
@@ -129,7 +246,13 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Command::Attach { id } => attach::run(&dir, id),
+        Command::Attach { id, move_here } => {
+            if move_here {
+                attach::run_move(&dir, id)
+            } else {
+                attach::run(&dir, id)
+            }
+        }
         Command::Status { json } => {
             let rows = sessions(&dir)?;
             if json {
@@ -160,7 +283,11 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Board if io::stdin().is_terminal() && io::stdout().is_terminal() => {
-            board::run(&dir)
+            if let Some(workspace) = kiro_agents::workspace_context()? {
+                workspace.dashboard()
+            } else {
+                board::run(&dir)
+            }
         }
         Command::Board => display(&sessions(&dir)?),
     }

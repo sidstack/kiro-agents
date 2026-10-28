@@ -1,0 +1,23 @@
+---
+source: src/board/view.rs
+expression: "render(&board, &create, 100, 20, true)"
+---
+Kiro sessions
+  ┌New session: placement · 3/3──────────────────────────────────────────────────────────────────┐
+  │Directory: /work/project                                                                      │
+  │Agent: reviewer                                                                               │
+  │› Split right (default)                                                                       │
+  │  Split below                                                                                 │
+  │  New window                                                                                  │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │↑/↓ choose · Enter confirms · v right · h below · w window                                    │
+  │Esc goes back without creating                                                                │
+  │The chosen pane receives the session; no active pane or shell is replaced.                    │
+  │                                                                                              │
+  └──────────────────────────────────────────────────────────────────────────────────────────────┘

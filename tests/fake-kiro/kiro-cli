@@ -84,7 +84,11 @@ while True:
     if data == b"exit":
         os.write(1, b"GOODBYE\n")
         break
-    if data == b"flood":
+    if data == b"history":
+        for index in range(140):
+            os.write(1, f"\r\nSCROLL_LINE_{index:03}".encode())
+        os.write(1, b"\r\nSCROLL_END\r\n")
+    elif data == b"flood":
         for _ in range(640):
             os.write(1, b"x" * 4096)
         os.write(1, b"FLOOD_DONE\n")

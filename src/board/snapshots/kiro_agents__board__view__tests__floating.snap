@@ -1,0 +1,23 @@
+---
+source: src/board/view.rs
+expression: "render(&board, &Mode::Browse, 100, 20, true)"
+---
+┌Kiro sessions · floating · v<version>─────────────────────────────────────────────────────────────────┐
+│ LIVE   1/8 live  ·  0 historical  ·  Search:                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Projects and sessions─────────────────────────────────────────────────────────────────────────────┐
+│› project · reviewer · #session-one   · live                                                      │
+│  reviewer · v2 · session-one · /work/project                                                     │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+/work/project
+Enter focuses this session · v split right · h split below · w new window
+
+↑/↓ j/k select · Enter focus · v split right · h split below · w new window
+Ctrl+N new · m move here · F2 rename · Ctrl+K stop · / search · Esc closes popup

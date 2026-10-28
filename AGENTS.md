@@ -161,18 +161,23 @@ Installer changes must retain checksum/archive/version verification and atomic r
 never require sudo or restart hosts. Tests use local mocked release downloads and a temporary
 installation directory; keep the default latest channel stable, with explicit beta selection.
 
+Optional workspaces use real external tmux, which owns panes,
+windows, scrollback and shells. Assemble the backend through WorkspaceFeature; keep
+session-host ownership independent. Never use the default/user tmux server or modify
+~/.tmux.conf; use only the private wrapper-state socket. Closing panes/workspaces must
+not stop managed Kiro sessions. See docs/WORKSPACES.md and docs/journal/MULTIPLEXER.md.
+Workspace tests require tmux 3.2+ and use only temporary private sockets. Exercise
+prefix keys through a real attached PTY client: tmux send-keys bypasses the client's
+prefix parser. Keep the test in make check and the extracted-beta integration suite.
+
+Next-batch plans live in docs/BACKLOG.md: native historical-session resume and local
+fuzzy/full-text session quick-open, with separately verified V2/V3 store adapters.
+These are backlog items only; do not include them in the current multiplexer batch.
 Naming upgrade compatibility: custom labels are shared persistent metadata in private names.json,
 not an RPC requirement or a reason to restart live hosts. Status enrichment must support
 pre-naming hosts. Keep the actual v0.2.0 compatibility regression (synthetic old peer in
 CI), unique unnamed-session labels, and version-independent rendering snapshots. Do not
 claim automatic SQLite TUI titles until ownership mapping is verified; do not guess by cwd.
-
-Frontend lifecycle: keep Crossterm's use-dev-tty backend and explicit terminal-hangup
-exit checks; its mio backend can spin inside poll after PTY EOF/EIO. Tests must prove
-closed terminal frontends exit. The bounded CPU/PTY/host EOF regression runs in make
-check and against extracted betas. Native title ownership may use a bounded,
-start-time-checked descendant parent chain; main-thread children lists alone miss
-Kiro's runtime-thread launcher chain. See docs/INCIDENT-2026-10-26-CPU.md.
 
 Attached frontend navigation uses Ctrl+Q alone to return to the dashboard. Preserve
 Kiro's native Ctrl+G crew shortcut and tmux's Ctrl+B prefix. Left Arrow always
@@ -180,3 +185,31 @@ passes through; do not infer editor emptiness from keystrokes or terminal output
 Navigation belongs to the frontend: relaunch it after installation without
 restarting the host or managed sessions. Test Ctrl+Q through a real PTY with raw
 mode/IXON verification, plus native Ctrl+G and Ctrl+B byte passthrough.
+
+Frontend lifecycle: keep Crossterm's use-dev-tty backend and explicit terminal-hangup
+exit checks; its mio backend can spin inside poll after PTY EOF/EIO. Tests must prove
+closed pane frontends exit, not only that tmux removed a pane. The bounded CPU/PTY/host
+EOF regression runs in make check and against extracted betas. Native title ownership
+may use a bounded, start-time-checked descendant parent chain; main-thread children
+lists alone miss Kiro's runtime-thread launcher chain. See docs/INCIDENT-2026-10-26-CPU.md.
+
+Workspace primary-screen scrolling belongs to tmux's scrollback buffer: wheel and
+PageUp enter/scroll copy mode, not prompt-history or injected page keys. Preserve
+native mouse events for applications that request them and native page keys for
+alternate-screen applications. Test actual viewport movement and no input leakage,
+not only echoed key bytes. Do not change direct native attach passthrough.
+
+Directory selection recursively indexes home (plus cwd outside home) in a cancellable
+background worker. Keep all discovered rows searchable and scrollable; render only
+the viewport. Reuse the private directory-cache for 24 hours, show stale results
+while refreshing, and make Ctrl+R force a rescan. Preserve explicit paths and
+selection-only creation. Discovery excludes hidden/dependency/build trees and
+symlinks, has directory/entry/time bounds, and never requires fd/fzf. Cache tests
+must isolate HOME/state and cover TTL, force, corrupt-file recovery and permissions.
+
+Live session moves are cooperative frontend handoffs, not native history resume or
+host takeover. `m` + confirmation / `attach ID --move` releases only an updated
+frontend through a private token-checked lease/socket, then uses ordinary Attach.
+Never signal or kill a source process, restart the host, or change the host protocol
+for this feature. Preserve exclusive attachment, bounded release waits, old-peer
+refusal, native child PID, and token-checked cleanup of successor registrations.

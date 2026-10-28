@@ -15,7 +15,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / "target/debug/kiro-agents"
-# An optional released binary starts the host to verify frontend-only upgrades.
+# Optional released binary starts the host to verify frontend-only upgrades.
 HOST_BINARY = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else BINARY
 
 

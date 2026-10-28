@@ -1,3 +1,5 @@
+mod transfer;
+
 use crate::{
     host,
     protocol::{self, Action, Reply},
@@ -165,6 +167,7 @@ pub fn run_with_interrupt(dir: &Path, id: String, interrupted: Arc<AtomicBool>) 
         id,
         interrupted,
         Cleanup::Standalone,
+        false,
         None::<fn() -> Result<()>>,
     )
 }
@@ -184,37 +187,76 @@ pub fn run_from_board(
     interrupted: Arc<AtomicBool>,
     on_handoff: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
-    handoff(dir, id, interrupted, Cleanup::Board, Some(on_handoff))
+    handoff(
+        dir,
+        id,
+        interrupted,
+        Cleanup::Board,
+        false,
+        Some(on_handoff),
+    )
 }
 
-fn handoff(
+/// Explicitly move an existing attachment without replacing its host or Kiro child.
+pub fn run_move(dir: &Path, id: String) -> Result<()> {
+    handoff(
+        dir,
+        id,
+        Arc::new(AtomicBool::new(false)),
+        Cleanup::Standalone,
+        true,
+        None::<fn() -> Result<()>>,
+    )
+}
+
+pub fn run_from_board_move(
     dir: &Path,
     id: String,
     interrupted: Arc<AtomicBool>,
-    cleanup: Cleanup,
-    on_handoff: Option<impl FnOnce() -> Result<()>>,
+    on_handoff: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
-    anyhow::ensure!(
-        io::stdin().is_terminal() && io::stdout().is_terminal(),
-        "Attach requires an interactive terminal"
-    );
+    handoff(dir, id, interrupted, Cleanup::Board, true, Some(on_handoff))
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Session is open in another terminal. Choose Move here to detach it there and continue here."
+)]
+struct AttachedElsewhere;
+
+pub fn is_attached_elsewhere(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<AttachedElsewhere>().is_some()
+}
+
+fn connect_attachment(
+    dir: &Path,
+    id: &str,
+    cols: u16,
+    rows: u16,
+) -> Result<(
+    std::os::unix::net::UnixStream,
+    BufReader<std::os::unix::net::UnixStream>,
+)> {
     let mut stream = host::connect(dir, false)?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
-    // A stalled host must fail recoverably, not hang the board between effects.
     stream.set_read_timeout(Some(ACK_TIMEOUT))?;
-    let (mut cols, mut rows) = crossterm::terminal::size()?;
     protocol::send(
         &mut stream,
-        &protocol::request(Action::Attach { id, cols, rows }),
+        &protocol::request(Action::Attach {
+            id: id.to_owned(),
+            cols,
+            rows,
+        }),
     )?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let ack = protocol::receive(&mut reader);
-    // The bounded wait covers only the ACK; the byte pump must not time out
-    // mid-frame while a session is legitimately quiet.
     stream.set_read_timeout(None)?;
     reader.get_mut().set_read_timeout(None)?;
     match ack {
-        Ok(Reply::Ok) => (),
+        Ok(Reply::Ok) => Ok((stream, reader)),
+        Ok(Reply::Error(error)) if error.starts_with("Session already attached;") => {
+            Err(AttachedElsewhere.into())
+        }
         Ok(Reply::Error(error)) => anyhow::bail!(error),
         Ok(_) => anyhow::bail!("Unexpected attach response"),
         Err(protocol::FrameError::Io(error))
@@ -226,8 +268,67 @@ fn handoff(
             let _ = protocol::send(&mut stream, &protocol::request(Action::Detach));
             anyhow::bail!("Host did not acknowledge attach in time; sessions stay alive")
         }
-        Err(error) => return Err(error.into()),
+        Err(error) => Err(error.into()),
     }
+}
+
+fn handoff(
+    dir: &Path,
+    id: String,
+    interrupted: Arc<AtomicBool>,
+    cleanup: Cleanup,
+    move_here: bool,
+    on_handoff: Option<impl FnOnce() -> Result<()>>,
+) -> Result<()> {
+    anyhow::ensure!(
+        io::stdin().is_terminal() && io::stdout().is_terminal(),
+        "Attach requires an interactive terminal"
+    );
+    let (mut cols, mut rows) = crossterm::terminal::size()?;
+    let first = connect_attachment(dir, &id, cols, rows);
+    let (mut stream, mut reader) = match first {
+        Err(error) if move_here && is_attached_elsewhere(&error) => {
+            transfer::release(dir, &id)?;
+            // An older host may need one poll to consume Detach and release
+            // its guard. Retry ordinary Attach; never evict a racing owner.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            loop {
+                match connect_attachment(dir, &id, cols, rows) {
+                    Err(error)
+                        if is_attached_elsewhere(&error)
+                            && std::time::Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(20))
+                    }
+                    result => break result?,
+                }
+            }
+        }
+        result => result?,
+    };
+    let registration = match transfer::Registration::new(dir, &id) {
+        Ok(registration) => Some(registration),
+        Err(_) => {
+            tracing::warn!("Frontend handoff unavailable; native attachment continues");
+            None
+        }
+    };
+    let _workspace_attachment = match crate::workspace_context() {
+        Ok(Some(feature)) => match feature.register_attachment(&id) {
+            Ok(registration) => registration,
+            Err(_) => {
+                tracing::warn!(
+                    "Workspace pane association unavailable; native attachment continues"
+                );
+                None
+            }
+        },
+        Ok(None) => None,
+        Err(_) => {
+            tracing::warn!("Workspace context unavailable; native attachment continues");
+            None
+        }
+    };
     let mut signals = Vec::new();
     for signal in [libc::SIGTERM, libc::SIGHUP, libc::SIGINT] {
         signals.push(signal_hook::flag::register(signal, interrupted.clone())?);
@@ -248,6 +349,12 @@ fn handoff(
         let mut leader = Leader::default();
         let mut bytes = [0u8; 4096];
         while !interrupted.load(Ordering::Relaxed) {
+            if registration
+                .as_ref()
+                .is_some_and(transfer::Registration::requested)
+            {
+                break;
+            }
             // One poll covers host output and typed input, so input latency
             // is the wake-up itself rather than the tail of a host-only wait.
             let (host_ready, input_ready) = if reader.buffer().is_empty() {

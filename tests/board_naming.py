@@ -16,7 +16,7 @@ def main():
         native.mkdir(parents=True)
         native_pids = root / 'native-pids'
         native_pids.mkdir()
-        env = dict(os.environ, KIRO_AGENTS_HOME=str(root / 'state'),
+        env = dict(os.environ, HOME=str(root), KIRO_AGENTS_HOME=str(root / 'state'),
                    KIRO_HOME=str(root / 'kiro'), KIRO_SESSIONS_DIR=str(native),
                    KIRO_AGENT_CONFIG_DIR=str(root / 'kiro/agents'),
                    KIRO_AGENTS_AUTO_NAME='auto', TERM='xterm-256color',

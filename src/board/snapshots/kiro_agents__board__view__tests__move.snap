@@ -1,0 +1,23 @@
+---
+source: src/board/view.rs
+expression: "render(&board, &Mode::Move(\"session-one\".into()), 100, 20)"
+---
+Kiro sessions
+  ┌Move session here? y/n────────────────────────────────────────────────────────────────────────┐
+  │session-one                                                                                   │
+  │Detaches the other terminal; its dashboard or shell returns.                                  │
+  │The same Kiro process keeps running.                                                          │
+  │y moves here · n/Esc cancels                                                                  │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  └──────────────────────────────────────────────────────────────────────────────────────────────┘

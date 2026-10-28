@@ -5,6 +5,7 @@ check:
 	cargo test
 	cargo build --locked
 	python3 tests/terminal_smoke.py
+	python3 tests/board_move.py
 	python3 tests/board_smoke.py
 	python3 tests/board_errors.py
 	python3 tests/board_handoff.py
@@ -13,6 +14,8 @@ check:
 	python3 tests/board_search.py
 	python3 tests/board_naming.py
 	python3 tests/naming_upgrade.py
+	python3 tests/workspace.py
+	python3 tests/workspace_dashboard.py
 	python3 tests/frontend_lifecycle.py
 	sh -n install.sh
 	python3 tests/installer.py
