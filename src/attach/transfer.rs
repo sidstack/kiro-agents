@@ -130,6 +130,14 @@ impl Registration {
         listener.set_nonblocking(true)?;
         {
             let _lock = lock(&registration.dir, &registration.key)?;
+            // Host ACK proves the previous registration no longer owns this
+            // attachment, including leftovers from a killed frontend. Only
+            // remove its validated private control path, never a process.
+            if let Ok(previous) = read_lease(&registration.dir, &registration.key) {
+                if valid(&previous, id) && previous.token != registration.lease.token {
+                    let _ = fs::remove_file(registration.dir.join(previous.socket));
+                }
+            }
             let temp = registration
                 .dir
                 .join(format!("{}.tmp", registration.lease.token));
