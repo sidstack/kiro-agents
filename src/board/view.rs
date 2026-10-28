@@ -107,7 +107,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
     frame.render_widget(
         Paragraph::new(vec![
             Line::raw("↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh"),
-            Line::raw("Ctrl+N create · F2 rename · Ctrl+K stop · q/Ctrl+Q quit"),
+            Line::raw("Ctrl+N create · m move here · F2 rename · Ctrl+K stop · q/Ctrl+Q quit"),
             Line::styled(message, Style::default().fg(Color::Yellow)),
         ]),
         areas[3],
@@ -115,7 +115,11 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
 
     if matches!(
         mode,
-        Mode::Directory(_) | Mode::Agent { .. } | Mode::Stop(_) | Mode::Rename { .. }
+        Mode::Directory(_)
+            | Mode::Agent { .. }
+            | Mode::Move(_)
+            | Mode::Stop(_)
+            | Mode::Rename { .. }
     ) {
         frame.render_widget(Clear, area);
         frame.render_widget(
@@ -235,6 +239,12 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str)
                     .wrap(Wrap { trim: false }), popup);
             input_cursor(frame, popup, "Name: ", query, 1);
             input_cursor(frame, popup, "Name: ", query, 1);
+        }
+        Mode::Move(id) => {
+            let popup = modal(frame, "Move session here? y/n");
+            frame.render_widget(
+                Paragraph::new(format!("{id}\nDetaches the other terminal; its dashboard or shell returns.\nThe same Kiro process keeps running.\ny moves here · n/Esc cancels"))
+                    .wrap(Wrap { trim: false }), popup);
         }
         Mode::Stop(id) => {
             let popup = modal(frame, "Stop session? y/n");
@@ -371,6 +381,10 @@ mod tests {
                 100,
                 20
             )
+        );
+        insta::assert_snapshot!(
+            "move",
+            render(&board, &Mode::Move("session-one".into()), 100, 20)
         );
         insta::assert_snapshot!(
             "stop",

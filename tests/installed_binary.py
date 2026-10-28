@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'x86_64-unknown-linux-gnu'
 EXECUTABLE = 'kiro-agents'
 DOCS = ('LICENSE', 'README.md', 'CHANGELOG.md')
-SCRIPTS = ('terminal_smoke.py', 'board_smoke.py', 'board_errors.py',
+SCRIPTS = ('terminal_smoke.py', 'board_move.py', 'board_smoke.py', 'board_errors.py',
            'board_handoff.py', 'board_ack.py', 'board_picker.py',
            'board_search.py', 'board_naming.py', 'naming_upgrade.py',
            'frontend_lifecycle.py')

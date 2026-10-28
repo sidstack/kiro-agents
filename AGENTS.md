@@ -180,3 +180,10 @@ passes through; do not infer editor emptiness from keystrokes or terminal output
 Navigation belongs to the frontend: relaunch it after installation without
 restarting the host or managed sessions. Test Ctrl+Q through a real PTY with raw
 mode/IXON verification, plus native Ctrl+G and Ctrl+B byte passthrough.
+
+Live session moves are cooperative frontend handoffs, not native history resume or
+host takeover. `m` + confirmation / `attach ID --move` releases only an updated
+frontend through a private token-checked lease/socket, then uses ordinary Attach.
+Never signal or kill a source process, restart the host, or change the host protocol
+for this feature. Preserve exclusive attachment, bounded release waits, old-peer
+refusal, native child PID, and token-checked cleanup of successor registrations.

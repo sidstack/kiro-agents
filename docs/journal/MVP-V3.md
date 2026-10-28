@@ -150,3 +150,11 @@ and its temporary credential copies removed after workers disconnected.
 - Validate the actual PTY detach path and regression coverage for forwarded keys.
 
 - Preserve Kiro’s Ctrl+G crew shortcut and verify raw-mode IXON is disabled.
+
+### Explicit live-session handoff
+
+- [x] Confirm standalone/workspace registry identity; no native store import.
+- [x] Add frontend-owned, token-checked release with bounded wait and cleanup.
+- [x] Add Move here confirmation and explicit `attach ID --move` CLI action.
+- [x] Preserve existing host RPC, native process identity, and old-peer refusal.
+- [x] Exercise consent/cancel, round-trip attachment, cleanup, and older-host PTYs.

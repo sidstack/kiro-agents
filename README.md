@@ -99,7 +99,14 @@ Backspace encodings edit the query. Typing a path is also supported. Tab or Righ
 browses a directory; Left Arrow goes to its parent;
 Ctrl+U clears the query and Ctrl+R retries discovery. Esc from the agent list goes
 back to the directory picker. Ctrl+K asks before stopping the selected live
-session. F2 names a session; an empty name restores its automatic title. The board
+session. Press **m** on a live session for **Move here**, then **y** to confirm
+(**n/Esc** cancels). Enter on an already attached session also offers this choice.
+The other updated frontend detaches to its dashboard or shell; the same Kiro
+process continues here. `kiro-agents attach ID --move` is the explicit CLI equivalent.
+No store migration or host restart is involved. A frontend from an older release
+must be detached and reopened once with the updated binary before it can accept
+a move; unsupported/stale registrations leave its attachment untouched.
+F2 names a session; an empty name restores its automatic title. The board
 prefers a manual name, then an exactly matched native Kiro title, a short first-prompt
 title, and directory/agent plus a unique ID as the fallback. F2 names work even with an
 older running host. Automatic SQLite TUI titles are not supported until a verified

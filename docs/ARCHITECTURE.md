@@ -222,3 +222,25 @@ to an existing host does not relaunch the host executable as the dashboard or
 attach frontend. Ctrl+Q filtering runs in the invoking frontend. Installing a
 replacement does not change an already running frontend; exit that frontend and
 invoke the installed binary again. No host restart is required.
+
+### Implemented cooperative frontend handoff
+
+The registry belongs to the host and is shared by every frontend using the same
+`KIRO_AGENTS_HOME`; there is no separate standalone session store to merge. Live
+attachment remains exclusive. Dashboard `m` + confirmation and CLI `attach ID --move`
+request an existing updated frontend to release its attachment, then perform a
+normal attach. Kiro and its host never stop or relaunch. No host protocol change
+is required, including with older published hosts.
+
+After host ACK, a frontend registers a private per-session lease and unique Unix
+control socket under wrapper `frontends/`. A token-checked explicit release request
+sets a short-lived flag; the source frontend sends normal Detach and restores its
+terminal. The destination waits for registration cleanup, then retries ordinary
+Attach briefly while the host consumes Detach. Competing destinations are still
+serialized by the host's existing exclusive-attachment check. A late predecessor
+cleanup cannot remove its successor's metadata. Nothing signals a process or
+injects bytes into a terminal. Old, stale, malformed or unavailable registrations
+fail safely, without forcibly evicting a terminal or restarting a host. Interrupted
+hosts need no new RPC capabilities; frontends from older releases must be reopened
+once to register. Sockets/leases are removed on frontend cleanup, and only bounded
+metadata is read; no transcript or environment is stored.

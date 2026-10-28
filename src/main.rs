@@ -40,7 +40,12 @@ enum Command {
         no_attach: bool,
     },
     /// Reconnect to the same live process
-    Attach { id: String },
+    Attach {
+        id: String,
+        /// Move the attachment from another updated frontend; Kiro keeps running
+        #[arg(long = "move")]
+        move_here: bool,
+    },
     /// List metadata; no transcript is stored
     Status {
         #[arg(long)]
@@ -129,7 +134,13 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Command::Attach { id } => attach::run(&dir, id),
+        Command::Attach { id, move_here } => {
+            if move_here {
+                attach::run_move(&dir, id)
+            } else {
+                attach::run(&dir, id)
+            }
+        }
         Command::Status { json } => {
             let rows = sessions(&dir)?;
             if json {

@@ -228,3 +228,15 @@ and detaches with Ctrl+Q while preserving the Kiro PID:
 `python3 tests/terminal_smoke.py target/debug/kiro-agents /path/to/v0.4.2/kiro-agents`.
 Already running frontends retain their executable until exit; installer replacement
 applies to subsequent launches. SSH-client shortcut acceptance remains manual.
+
+## 2026-10-28 — Shared registry and cooperative attachment moves
+
+Standalone and workspace frontends already address the same host registry via
+`KIRO_AGENTS_HOME`. The observed “already attached” error represents exclusive
+terminal ownership, not separate session stores. Native historical import remains
+out of scope. An explicit frontend-to-frontend release followed by ordinary Attach
+moves the live terminal connection without changing native identity, host RPC,
+generation, or Kiro-owned files. PTY regressions cover consent/cancellation,
+round-trip movement with the same child PID, registration cleanup, refusal of a
+noninteractive destination, and an unregistered older frontend retaining its
+connection. Compatibility is also tested with a published v0.4.2 host.
