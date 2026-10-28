@@ -161,7 +161,7 @@ Installer changes must retain checksum/archive/version verification and atomic r
 never require sudo or restart hosts. Tests use local mocked release downloads and a temporary
 installation directory; keep the default latest channel stable, with explicit beta selection.
 
-Optional workspace work lives on feat/tmux-workspaces: real external tmux owns panes,
+Optional workspaces use real external tmux, which owns panes,
 windows, scrollback and shells. Assemble the backend through WorkspaceFeature; keep
 session-host ownership independent. Never use the default/user tmux server or modify
 ~/.tmux.conf; use only the private wrapper-state socket. Closing panes/workspaces must

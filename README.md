@@ -141,7 +141,7 @@ Kiro loads your own profiles, steering, MCP, and permissions from the target cwd
 and its native configuration. The wrapper never writes Kiro configuration or
 profiles and never adds tool-trust flags.
 
-## Optional workspaces (feature branch)
+## Optional tmux workspaces
 
 This branch adds `kiro-agents workspace` for tmux panes and windows. Each pane can
 select a managed Kiro session or run a plain shell. Use the usual Ctrl+B prefix:

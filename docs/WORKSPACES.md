@@ -1,4 +1,4 @@
-# Tmux workspaces (feature branch)
+# Optional tmux workspaces
 
 Workspace mode is optional and requires external tmux 3.2+. The normal session board
 is unchanged; Kiro processes remain owned by the existing session host. Workspaces
