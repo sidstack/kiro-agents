@@ -5,6 +5,13 @@ Conventional Commits by release-please.
 
 ## Local MVP history (before automated releases)
 
+## [0.6.0](https://github.com/sidstack/kiro-agents/compare/v0.5.0...v0.6.0) (2026-10-29)
+
+
+### Features
+
+* add private tmux customization and session pane labels ([#27](https://github.com/sidstack/kiro-agents/issues/27)) ([4c7ab4b](https://github.com/sidstack/kiro-agents/commit/4c7ab4b4114c8cbfe2b7e4faf8787add2fff1f77))
+
 ## [0.5.0](https://github.com/sidstack/kiro-agents/compare/v0.4.3...v0.5.0) (2026-10-28)
 
 
