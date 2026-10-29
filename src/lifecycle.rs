@@ -1,4 +1,6 @@
 //! Activity is independent of process liveness. Missing telemetry stays unknown.
+pub mod policy;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
