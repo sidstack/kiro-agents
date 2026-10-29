@@ -35,7 +35,6 @@ class Board:
         except BaseException:
             self.close()
             raise
-        self.all = False
 
     def drain(self, duration=0.2):
         deadline = time.monotonic() + duration
@@ -67,12 +66,6 @@ class Board:
         self.frames = b""
         self.press(b"r")
         return self.wait(b"Kiro sessions")
-
-    def filter(self, all_rows):
-        if self.all != all_rows:
-            self.press(b"\t")
-            self.all = all_rows
-        return self.screen()
 
     def search(self, identifier):
         self.press(b"/")
@@ -165,8 +158,21 @@ def main():
             boards.append(board)
             screen = board.screen()
             assert first["id"].encode() in screen and second["id"].encode() in screen
-            assert history["id"].encode() not in screen
-            assert history["id"].encode() in board.filter(True)
+            assert history["id"].encode() in screen
+            assert b"activity unknown" in screen
+            for label in [b"Needs you", b"Working", b"Ready"]:
+                board.press(b"\t")
+                filtered = board.screen()
+                assert label in filtered
+                assert first["id"].encode() not in filtered
+            board.press(b"\t")
+            inactive = board.screen()
+            assert b"Inactive" in inactive and history["id"].encode() in inactive
+            assert first["id"].encode() not in inactive
+            board.press(b"\x1b[Z")
+            assert b"Ready" in board.screen()
+            board.press(b"\t\t")
+            assert history["id"].encode() in board.screen()
             board.press(b"j")
             board.press(b"k")
             screen = board.search(first["id"])
@@ -179,7 +185,6 @@ def main():
             assert b"Cannot attach" in board.screen()
             assert rows() == before, "History selection must not spawn or attach"
             board.press(b"\x1b")
-            board.filter(False)
             for row, text in [(first, b"hi"), (second, b"yo")]:
                 board.search(row["id"])
                 startup = board.attach()

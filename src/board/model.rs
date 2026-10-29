@@ -1,12 +1,12 @@
 use crate::protocol::SessionInfo;
 
-const LIVE_STATE: &str = "live";
+use crate::lifecycle::Filter;
 
 /// Filter and selection state for the session board rows received from the host.
 #[derive(Debug, Clone, Default)]
 pub struct Board {
     pub rows: Vec<SessionInfo>,
-    pub all: bool,
+    pub filter: Filter,
     pub query: String,
     selected: Option<String>,
 }
@@ -18,7 +18,7 @@ impl Board {
         self.reanchor();
     }
 
-    /// Row indices that pass the live/all filter and the search query.
+    /// Row indices that pass the activity filter and the search query.
     pub fn visible_indices(&self) -> Vec<usize> {
         let query = self.query.to_lowercase();
         let mut rows: Vec<_> = self
@@ -83,8 +83,8 @@ impl Board {
         self.reanchor();
     }
 
-    pub fn toggle_filter(&mut self) {
-        self.all = !self.all;
+    pub fn cycle_filter(&mut self, backwards: bool) {
+        self.filter = self.filter.next(backwards);
         self.reanchor();
     }
 
@@ -93,7 +93,7 @@ impl Board {
     }
 
     fn matches(&self, row: &SessionInfo, query: &str) -> bool {
-        if !self.all && row.state != LIVE_STATE {
+        if !self.filter.matches(row.state == "live", row.activity) {
             return false;
         }
         if query.is_empty() {
@@ -132,6 +132,7 @@ mod tests {
 
     fn row(id: &str, cwd: &str, agent: Option<&str>, state: &str) -> SessionInfo {
         SessionInfo {
+            activity: Default::default(),
             name: None,
             title: None,
             title_source: None,
@@ -168,11 +169,9 @@ mod tests {
     }
 
     #[test]
-    fn filters_live_by_default_and_searches_case_insensitively() {
+    fn defaults_to_all_and_searches_case_insensitively() {
         let mut board = Board::default();
         board.replace_rows(sample());
-        assert_eq!(ids(&board), ["wrap-1"]);
-        board.toggle_filter();
         assert_eq!(ids(&board), ["wrap-1", "wrap-2", "wrap-3"]);
         board.set_query("ÜNÏCÖ".into());
         assert_eq!(ids(&board), ["wrap-1"]);
@@ -185,7 +184,7 @@ mod tests {
         board.set_query("nope".into());
         assert!(ids(&board).is_empty());
         assert!(board.selected().is_none());
-        board.toggle_filter();
+        board.filter = Filter::All;
         assert!(ids(&board).is_empty());
     }
 
@@ -197,7 +196,7 @@ mod tests {
             board.selected().map(|row| row.id.clone()),
             Some("wrap-1".into())
         );
-        board.toggle_filter();
+        board.filter = Filter::All;
         board.move_selection(1);
         assert_eq!(
             board.selected().map(|row| row.id.clone()),
@@ -240,7 +239,7 @@ mod tests {
         board.replace_rows(vec![]);
         assert!(board.selected().is_none());
 
-        board.toggle_filter();
+        board.filter = Filter::All;
         board.replace_rows(sample());
         board.move_selection(-1);
         assert_eq!(

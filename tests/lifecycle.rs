@@ -117,6 +117,7 @@ fn output_until(reader: &mut BufReader<UnixStream>, marker: &[u8]) -> Vec<u8> {
 fn detach_reconnect_drain_resize_and_stop_owned_child() {
     let harness = Harness::new();
     let session = harness.new_session(Some("reviewer"));
+    assert_eq!(session.activity, kiro_agents::lifecycle::Activity::Unknown);
     let (mut stream, mut reader) = harness.attach(&session.id);
     let startup = output_until(&mut reader, b"READY:");
     assert!(String::from_utf8_lossy(&startup).contains(":reviewer"));

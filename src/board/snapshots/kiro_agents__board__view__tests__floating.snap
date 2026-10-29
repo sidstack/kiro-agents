@@ -3,10 +3,10 @@ source: src/board/view.rs
 expression: "render(&board, &Mode::Browse, 100, 20, true)"
 ---
 ┌Kiro sessions · floating · v<version>─────────────────────────────────────────────────────────────────┐
-│ LIVE   1/8 live  ·  0 historical  ·  Search:                                                     │
+│ All   1/8 live  ·  0 inactive  ·  Search:                                                        │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Projects and sessions─────────────────────────────────────────────────────────────────────────────┐
-│› project · reviewer · #session-one   · live                                                      │
+│› project · reviewer · #session-one   · live · activity unknown                                   │
 │  reviewer · v2 · session-one · /work/project                                                     │
 │                                                                                                  │
 │                                                                                                  │
@@ -20,4 +20,4 @@ expression: "render(&board, &Mode::Browse, 100, 20, true)"
 Enter focuses · Shift+Enter / f focuses fullscreen · v split right · h split below · w new window
 
 ↑/↓ j/k select · Enter focus · Shift+Enter / f fullscreen · v/h split · w window
-Ctrl+N new · m move here · F2 rename · Ctrl+K stop · / search · Esc closes popup
+Ctrl+N new · m move here · F2 rename · Ctrl+K stop · Tab filters · / search · Esc closes popup

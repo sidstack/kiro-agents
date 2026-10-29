@@ -87,8 +87,9 @@ compatibility. No silent engine switch or profile rewriting.
   metadata-only persistence, unknown-format handling and cancellation.
 - [ ] Add trustworthy activity events behind the optional feature boundary; any
   native telemetry hook installation is explicitly opt-in.
-- [ ] Add the five filters, status reasons, last activity and frontend-only
-  compatibility behavior for existing hosts.
+- [x] Add the five filters and frontend-only compatibility for existing hosts,
+  with explicit unknown activity and unavailable-resume reasons.
+- [ ] Connect verified native activity/reason events and last-activity metadata.
 - [ ] Add explicit generation-safe Resume and configurable safe inactivity.
 - [ ] Exercise stop/resume, expired idle deadlines, working/approval/draft guards,
   duplicate/foreign locks, crashes, unsupported stores and old-peer compatibility
@@ -106,3 +107,21 @@ Native full-text quick-open remains a separate backlog item.
 
 The advertised flags and documentation are discovery inputs, not substitutes for
 verified native generation/lock behavior or authenticated lifecycle acceptance.
+
+## 2026-10-29 — First implementation milestone
+
+Branched from main after PR #27. The dashboard now defaults to All and cycles
+All / Needs you / Working / Ready / Inactive with Tab and Shift+Tab. Process
+liveness is independent of an additive, optional activity field; missing or
+unrecognized values become Unknown. Current hosts provide no turn telemetry and
+therefore show “live · activity unknown” in All, never Ready. Inactive includes
+stopped, exited and failed managed rows, preserving their error/exit metadata.
+Search and named selection survive refresh and filter changes where still visible.
+
+This milestone does not enable native history import/resume, hooks, automatic
+inactivity, last-activity clocks, or V3 launches. It does not authorize automatic
+stopping. Native identity, generation provenance, real status events and draft
+safety remain the next verification gate. Unknown activity is omitted when
+serializing, preserving the existing old-host wire shape; no protocol bump or
+host restart is required for the frontend filters. Synthetic activity fixtures
+exercise UI classification, not claims about real Kiro telemetry.

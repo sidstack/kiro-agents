@@ -35,6 +35,11 @@ pub enum Reply {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionInfo {
+    #[serde(
+        default,
+        skip_serializing_if = "crate::lifecycle::Activity::is_unknown"
+    )]
+    pub activity: crate::lifecycle::Activity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -118,5 +123,24 @@ pub fn request(action: Action) -> Request {
     Request {
         version: VERSION,
         action,
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn old_host_without_activity_is_unknown_and_future_activity_is_not_ready() {
+        let old = serde_json::json!({
+            "id": "old", "cwd": "/tmp", "agent": null, "generation": "v2",
+            "pid": 42, "state": "live", "exit_code": null, "notice": null
+        });
+        let row: SessionInfo = serde_json::from_value(old.clone()).unwrap();
+        assert_eq!(row.activity, crate::lifecycle::Activity::Unknown);
+        let mut future = old;
+        future["activity"] = "unrecognized".into();
+        let row: SessionInfo = serde_json::from_value(future).unwrap();
+        assert_eq!(row.activity, crate::lifecycle::Activity::Unknown);
     }
 }
