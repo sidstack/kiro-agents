@@ -126,3 +126,9 @@ Reload does not restart the host, Kiro processes or pane frontends. Like tmux's
 source-file, it applies commands rather than resetting every setting: explicitly
 unset/unbind old customizations when removing them. The machine's ~/.tmux.conf
 is not loaded automatically. Overrides can change wrapper shortcuts deliberately.
+
+In the floating dashboard, Shift+Enter focuses an already attached session and
+zooms its pane. This ensures fullscreen rather than toggling it off on a second
+use. The `f` key does the same on terminals that send Shift+Enter as ordinary
+Enter. Enter keeps ordinary navigation; F11 restores the split layout. Sessions
+without an existing pane still prompt for placement.

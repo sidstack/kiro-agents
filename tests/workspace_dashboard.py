@@ -168,6 +168,20 @@ def main():
             wait(lambda: current() == first and popup() is None, 'Enter did not focus already attached session')
             assert len(panes()) == 2 and panes()[0].split('\t')[1] == first_frontend
             open_dashboard()
+            choose(rows[1]['id'], b'f')
+            wait(lambda: current() == second and popup() is None, 'fullscreen did not focus selected session')
+            assert tmux('display-message', '-p', '-t', second, '#{window_zoomed_flag}').strip() == '1'
+            open_dashboard()
+            choose(rows[1]['id'], b'f')
+            wait(lambda: popup() is None, 'repeated fullscreen did not close popup')
+            assert tmux('display-message', '-p', '-t', second, '#{window_zoomed_flag}').strip() == '1'
+            open_dashboard()
+            choose(rows[0]['id'], b'f')
+            wait(lambda: current() == first and popup() is None, 'fullscreen did not reveal another pane')
+            assert tmux('display-message', '-p', '-t', first, '#{window_zoomed_flag}').strip() == '1'
+            press(b'\x1b[23~')
+            wait(lambda: tmux('display-message', '-p', '-t', first, '#{window_zoomed_flag}').strip() == '0', 'F11 did not restore split layout')
+            open_dashboard()
             choose(rows[2]['id'], b'w')
             third = wait(lambda: session_pane(rows[2]['id']), 'new window did not attach')
             assert tmux('display-message', '-p', '-t', third, '#{window_id}') != tmux('display-message', '-p', '-t', first, '#{window_id}')

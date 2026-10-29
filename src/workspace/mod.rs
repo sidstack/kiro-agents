@@ -471,8 +471,8 @@ impl WorkspaceFeature for TmuxWorkspace {
     fn dashboard(&self) -> Result<()> {
         self.show_dashboard(None)
     }
-    fn focus_session(&self, id: &str) -> Result<bool> {
-        self.navigate_existing(id)
+    fn focus_session(&self, id: &str, zoom: bool) -> Result<bool> {
+        self.navigate_existing_zoom(id, zoom)
     }
     fn open_session(&self, id: &str, cwd: &Path, placement: PanePlacement) -> Result<()> {
         self.place_session(id, cwd, placement)

@@ -236,6 +236,10 @@ impl TmuxWorkspace {
     }
 
     pub(super) fn navigate_existing(&self, id: &str) -> Result<bool> {
+        self.navigate_existing_zoom(id, false)
+    }
+
+    pub(super) fn navigate_existing_zoom(&self, id: &str, zoom: bool) -> Result<bool> {
         validate_session(id)?;
         let (origin, _) = self.owned_pane()?;
         let client = self.client_for(&origin)?;
@@ -289,6 +293,12 @@ impl TmuxWorkspace {
             &["select-pane", "-t", &pane],
             "Could not focus the session pane",
         )?;
+        if zoom && self.pane_value(&pane, "window_zoomed_flag")? != "1" {
+            self.run(
+                &["resize-pane", "-Z", "-t", &pane],
+                "Could not zoom the session pane",
+            )?;
+        }
         // Switching may close this client's popup: finish pane selection first.
         self.run(
             &["switch-client", "-c", &client, "-t", &target(&session)],
