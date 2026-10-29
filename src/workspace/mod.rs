@@ -1,6 +1,8 @@
 mod navigation;
 
-use crate::features::{PanePlacement, SplitDirection, WorkspaceAttachment, WorkspaceFeature};
+use crate::features::{
+    PanePlacement, PaneStep, SplitDirection, WorkspaceAttachment, WorkspaceFeature,
+};
 use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
 use std::{
@@ -277,6 +279,11 @@ impl TmuxWorkspace {
     // Pass tmux argv directly. Quoting belongs only to the shell command inside a pane.
     // Native prefix controls remain available alongside direct workspace bindings.
     fn configure_server(&self) -> Result<()> {
+        let navigation = crate::features::toggle(
+            "KIRO_AGENTS_WORKSPACE_NAV",
+            env::var("KIRO_AGENTS_WORKSPACE_NAV").ok().as_deref(),
+        )?;
+
         let shell = self.pane_command(true)?;
         self.run(
             &["set-option", "-g", "pane-border-status", "top"],
@@ -405,6 +412,37 @@ impl TmuxWorkspace {
             &["set-hook", "-g", "client-attached", &hook],
             "Could not configure the workspace dashboard",
         )?;
+        // Ctrl+J/Ctrl+K step through the live session panes. Only panes that
+        // host a session consume them, so shells, the dashboard popup and
+        // ordinary Enter (C-m) keep their native bytes. These bindings are
+        // installed before the private overrides below so tmux.conf wins.
+        for key in ["C-j", "C-k"] {
+            self.run(
+                &["unbind-key", "-q", "-T", "root", key],
+                "Could not clear the previous session shortcut",
+            )?;
+        }
+        if navigation {
+            for (key, step) in [("C-j", "next"), ("C-k", "previous")] {
+                let command = self.navigation_launcher(&["__workspace-nav", step])?;
+                let focus = format!("run-shell -b {}", shell_quote(&command));
+                let passthrough = format!("send-keys {key}");
+                self.run(
+                    &[
+                        "bind-key",
+                        "-T",
+                        "root",
+                        key,
+                        "if-shell",
+                        "-F",
+                        "#{?@kiro-agents-session,1,0}",
+                        &focus,
+                        &passthrough,
+                    ],
+                    "Could not bind live session navigation",
+                )?;
+            }
+        }
         // Deliberate private user overrides win over wrapper defaults. Never
         // discover or load the machine's global/user tmux configuration.
         let config = self.root.join("tmux.conf");
@@ -479,6 +517,9 @@ impl WorkspaceFeature for TmuxWorkspace {
     }
     fn move_session(&self, id: &str, cwd: &Path, placement: PanePlacement) -> Result<()> {
         self.place_session_move(id, cwd, placement)
+    }
+    fn step_live_session(&self, step: PaneStep) -> Result<bool> {
+        self.step_live_session(step)
     }
     fn register_attachment(&self, id: &str) -> Result<Option<Box<dyn WorkspaceAttachment>>> {
         self.track_attachment(id)

@@ -86,6 +86,8 @@ enum Command {
     },
     #[command(name = "__workspace-home", hide = true)]
     WorkspaceHome,
+    #[command(name = "__workspace-nav", hide = true)]
+    WorkspaceNav { step: String },
 }
 
 #[derive(Subcommand)]
@@ -197,6 +199,13 @@ fn main() -> Result<()> {
             }
         }
         Command::Workspace { command } => workspace(command),
+        Command::WorkspaceNav { step } => {
+            let step = kiro_agents::features::pane_step(&step)?;
+            let workspace = kiro_agents::workspace_context()?
+                .context("Cycle sessions from a pane in an owned workspace")?;
+            workspace.step_live_session(step)?;
+            Ok(())
+        }
         Command::Doctor => kiro::doctor(),
         Command::Agents { dir } => kiro::agents(&dir.canonicalize()?),
         Command::New {
