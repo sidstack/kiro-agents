@@ -101,7 +101,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
             || "No matching sessions. Ctrl+N creates a fresh session.".into(),
             |row| if row.state == "live" {
                 if popup {
-                    format!("{}\nEnter focuses this session · v split right · h split below · w new window", row.cwd)
+                    format!("{}\nEnter focuses · Shift+Enter / f focuses fullscreen · v split right · h split below · w new window", row.cwd)
                 } else {
                     format!("{}\nEnter attaches · Ctrl+Q returns here", row.cwd)
                 }
@@ -114,7 +114,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
     frame.render_widget(Paragraph::new(details).wrap(Wrap { trim: false }), areas[2]);
     let (select_line, actions_line) = if popup {
         (
-            "↑/↓ j/k select · Enter focus · v split right · h split below · w new window",
+            "↑/↓ j/k select · Enter focus · Shift+Enter / f fullscreen · v/h split · w window",
             "Ctrl+N new · m move here · F2 rename · Ctrl+K stop · / search · Esc closes popup",
         )
     } else {

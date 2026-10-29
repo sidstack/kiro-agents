@@ -90,6 +90,8 @@ enum Command {
 
 #[derive(Subcommand)]
 enum WorkspaceCommand {
+    /// Reapply private workspace defaults and workspaces/tmux.conf without restarting sessions
+    Reload,
     /// Open the centered session dashboard in this workspace
     Dashboard,
     /// Open/create a named workspace; each Kiro pane starts at the session board
@@ -132,6 +134,7 @@ fn workspace(command: Option<WorkspaceCommand>) -> Result<()> {
         dir: PathBuf::from("."),
         detach: false,
     }) {
+        WorkspaceCommand::Reload => feature.reload(),
         WorkspaceCommand::Dashboard => feature.dashboard(),
         WorkspaceCommand::Open { name, dir, detach } => feature.open(&name, &dir, detach),
         WorkspaceCommand::Split {

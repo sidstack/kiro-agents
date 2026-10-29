@@ -78,7 +78,7 @@ enum Effect {
         agent: Option<String>,
     },
     /// Floating dashboard only: focus the selected live session in its pane.
-    Focus(String),
+    Focus(String, bool),
     /// Floating dashboard only: place a live session through the workspace.
     Open {
         id: String,
@@ -221,11 +221,15 @@ impl App {
                         "Only a live session can be placed in a workspace pane; Ctrl+N creates one."
                             .into();
                 }
-                KeyCode::Enter => {
+                KeyCode::Enter | KeyCode::Char('f') if self.popup || key.code == KeyCode::Enter => {
                     if let Some(row) = self.board.selected() {
                         if row.state == "live" {
                             if self.popup {
-                                return Some(Effect::Focus(row.id.clone()));
+                                return Some(Effect::Focus(
+                                    row.id.clone(),
+                                    key.modifiers.contains(KeyModifiers::SHIFT)
+                                        || key.code == KeyCode::Char('f'),
+                                ));
                             }
                             return Some(Effect::Attach(row.id.clone()));
                         }
@@ -629,10 +633,10 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
                 refresh = Some(refresh_task(dir));
                 dirty = true;
             }
-            Some(Effect::Focus(id)) => {
+            Some(Effect::Focus(id, zoom)) => {
                 // Only the floating dashboard produces focus effects.
                 if let Some(navigator) = navigator {
-                    match navigator.focus_session(&id) {
+                    match navigator.focus_session(&id, zoom) {
                         Ok(true) => return Ok(()),
                         Ok(false) => {
                             let cwd = app
@@ -1042,11 +1046,22 @@ mod tests {
     fn popup_enter_focuses_without_attaching_a_native_pty() {
         let mut app = popup_app("live");
         assert!(
-            matches!(app.key(key(KeyCode::Enter)), Some(Effect::Focus(id)) if id == "selected")
+            matches!(app.key(key(KeyCode::Enter)), Some(Effect::Focus(id, false)) if id == "selected")
         );
         let mut app = popup_app("exited");
         assert!(app.key(key(KeyCode::Enter)).is_none());
         assert!(app.message.contains("Cannot attach"));
+    }
+
+    #[test]
+    fn popup_fullscreen_shortcuts_request_zoom() {
+        for key in [
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+        ] {
+            let mut app = popup_app("live");
+            assert!(matches!(app.key(key), Some(Effect::Focus(id, true)) if id == "selected"));
+        }
     }
 
     #[test]

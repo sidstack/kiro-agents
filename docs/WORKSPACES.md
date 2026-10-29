@@ -99,3 +99,36 @@ mouse mode enabled. PageUp/PageDown also work; q leaves tmux scrollback. Ordinar
 wheel scrolling still produces prompt-history arrows, so use the Shift modifier.
 This confirms the workaround for the tested setup, not all client versions or a
 plain-wheel fix. Native Up/Down prompt-history keys remain unchanged.
+
+## Private customization
+
+F11 toggles the selected pane's zoom without a prefix. Ctrl+B then z remains
+available. If the terminal handles F11 locally, configure it to forward that key.
+Pane borders show the session's dashboard name captured on attach; plain shell
+panes fall back to their current command. Reattach to refresh a changed title.
+
+Put selected tmux settings in `$KIRO_AGENTS_HOME/workspaces/tmux.conf` (normally
+`~/.kiro-agents/workspaces/tmux.conf`). This regular file, up to 256 KiB, is loaded
+**after** wrapper defaults whenever a workspace opens. Apply edits live with:
+
+```sh
+kiro-agents workspace reload
+```
+
+For example:
+
+```tmux
+bind-key -n F11 resize-pane -Z
+set-option -g pane-border-status top
+```
+
+Reload does not restart the host, Kiro processes or pane frontends. Like tmux's
+source-file, it applies commands rather than resetting every setting: explicitly
+unset/unbind old customizations when removing them. The machine's ~/.tmux.conf
+is not loaded automatically. Overrides can change wrapper shortcuts deliberately.
+
+In the floating dashboard, Shift+Enter focuses an already attached session and
+zooms its pane. This ensures fullscreen rather than toggling it off on a second
+use. The `f` key does the same on terminals that send Shift+Enter as ordinary
+Enter. Enter keeps ordinary navigation; F11 restores the split layout. Sessions
+without an existing pane still prompt for placement.

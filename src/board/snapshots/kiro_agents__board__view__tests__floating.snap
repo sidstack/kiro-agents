@@ -17,7 +17,7 @@ expression: "render(&board, &Mode::Browse, 100, 20, true)"
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 /work/project
-Enter focuses this session · v split right · h split below · w new window
+Enter focuses · Shift+Enter / f focuses fullscreen · v split right · h split below · w new window
 
-↑/↓ j/k select · Enter focus · v split right · h split below · w new window
+↑/↓ j/k select · Enter focus · Shift+Enter / f fullscreen · v/h split · w window
 Ctrl+N new · m move here · F2 rename · Ctrl+K stop · / search · Esc closes popup
