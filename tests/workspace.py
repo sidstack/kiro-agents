@@ -138,6 +138,7 @@ def main():
         try:
             disabled = dict(env, KIRO_AGENTS_WORKSPACES='off', KIRO_AGENTS_HOME=str(root / 'disabled'))
             cli('workspace', 'open', 'disabled', '--detach', context=disabled, success=False)
+            cli('workspace', 'reload', context=disabled, success=False)
             assert not (root / 'disabled/workspaces/tmux.sock').exists()
             missing = dict(env, KIRO_AGENTS_TMUX_BIN=str(root / 'missing-tmux'))
             cli('workspace', 'open', 'missing', '--detach', context=missing, success=False)
@@ -253,10 +254,15 @@ def main():
             assert tmux('show-options', '-gv', 'pane-border-status').strip() == 'top'
             assert tmux('show-options', '-pv', '-t', first, '@kiro-agents-title').strip()
             config = state / 'workspaces/tmux.conf'
-            config.write_text('set-option -g @config-test loaded\n')
+            config.write_text('unbind-key -n F11\nset-option -g @config-test loaded\n')
             cli('workspace', 'reload')
             assert tmux('show-options', '-gv', '@config-test').strip() == 'loaded'
+            assert 'F11' not in tmux('list-keys', '-T', 'root')
+            config.write_text('invalid-tmux-command\n')
+            cli('workspace', 'reload', success=False)
             config.unlink()
+            cli('workspace', 'reload')
+            assert 'F11' in tmux('list-keys', '-T', 'root')
             tmux('resize-pane', '-t', first, '-x', '90')
             size = tmux('display-message', '-p', '-t', first, '#{pane_width}x#{pane_height}').strip()
             wait(lambda: f'SIZE:{size}' in capture(first), 'exact resize did not reach fake Kiro')
