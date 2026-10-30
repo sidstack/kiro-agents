@@ -117,3 +117,29 @@ bounds. CI uses synthetic conversations and fake Kiro; no real auth/transcripts/
 5. Merge/release only after compatibility and behavioral gates pass; unknown formats
    remain visibly unsupported. Never add history/resume claims to shipped documentation
    before both generation paths are actually implemented and verified.
+
+
+## Workspace mouse ownership and terminal copy/paste
+
+Requested 2026-10-30 after MobaXterm SSH feedback. The user confirmed that setting
+`mouse off` on the private tmux server restored their terminal selection/paste
+workflow. Existing keyboard scrolling/navigation is acceptable to this user.
+This is manual acceptance for that client/setup, not a general clipboard guarantee.
+
+- [ ] Add an explicit, documented workspace mouse preference: terminal-owned
+  selection/paste versus tmux mouse controls. Evaluate terminal-owned behavior as
+  the default; tmux mouse handling should be an explicit choice. Do not change the
+  shipped default until the tradeoff and regressions have been reviewed.
+- [ ] Preserve private tmux.conf overrides and support workspace reload without
+  restarting native sessions/hosts. Never modify machine/user tmux configuration.
+- [ ] Keep PageUp/PageDown, keyboard pane navigation and fullscreen usable in both
+  modes. Explain loss of tmux wheel/pane-click behavior when mouse is off.
+- [ ] Keep copy selection visible/predictable and distinguish tmux's paste buffer
+  from the local OS clipboard. Do not assume OSC 52 support or access to the SSH
+  client's clipboard; preserve native application mouse behavior when enabled.
+- [ ] Add isolated PTY tests for both preferences, reload and override precedence;
+  manually verify selection retention and configured paste gestures in MobaXterm.
+  Synthetic terminal tests cannot prove local Windows clipboard integration.
+
+Current workaround: add `set -g mouse off` to private workspaces/tmux.conf and run
+`kiro-agents workspace reload`. This preference feature is not implemented yet.
