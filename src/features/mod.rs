@@ -62,6 +62,30 @@ pub enum PanePlacement {
     Window,
 }
 
+/// One step through the deterministic live session pane order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneStep {
+    Next,
+    Previous,
+}
+
+pub fn pane_step(value: &str) -> anyhow::Result<PaneStep> {
+    match value {
+        "next" => Ok(PaneStep::Next),
+        "previous" => Ok(PaneStep::Previous),
+        other => anyhow::bail!("Workspace navigation step must be next or previous ({other:?})"),
+    }
+}
+
+/// Shared parsing for optional feature toggles; unknown values are refused.
+pub fn toggle(name: &str, value: Option<&str>) -> anyhow::Result<bool> {
+    match value.unwrap_or("on") {
+        "on" | "true" | "1" => Ok(true),
+        "off" | "false" | "0" => Ok(false),
+        _ => anyhow::bail!("{name} must be on or off"),
+    }
+}
+
 /// Dropping a registration removes only this frontend's pane association.
 pub trait WorkspaceAttachment {}
 
@@ -81,6 +105,9 @@ pub trait WorkspaceFeature: Send + Sync {
         cwd: &std::path::Path,
         placement: PanePlacement,
     ) -> anyhow::Result<()>;
+    /// Focus the next or previous valid live session pane. False means the
+    /// client already holds the only reachable pane and nothing was changed.
+    fn step_live_session(&self, step: PaneStep) -> anyhow::Result<bool>;
     fn register_attachment(&self, id: &str)
         -> anyhow::Result<Option<Box<dyn WorkspaceAttachment>>>;
     fn open(&self, name: &str, cwd: &std::path::Path, detached: bool) -> anyhow::Result<()>;
@@ -113,5 +140,22 @@ mod tests {
             super::clean_title("Ünicode\n title\tworks").unwrap(),
             "Ünicode title works"
         );
+    }
+
+    #[test]
+    fn navigation_steps_and_toggles_are_explicit() {
+        assert_eq!(super::pane_step("next").unwrap(), super::PaneStep::Next);
+        assert_eq!(
+            super::pane_step("previous").unwrap(),
+            super::PaneStep::Previous
+        );
+        for bad in ["", "nextt", "next,previous", "up"] {
+            assert!(super::pane_step(bad).is_err(), "{bad:?}");
+        }
+        assert!(super::toggle("KIRO_AGENTS_WORKSPACE_NAV", None).unwrap());
+        assert!(super::toggle("KIRO_AGENTS_WORKSPACE_NAV", Some("on")).unwrap());
+        assert!(!super::toggle("KIRO_AGENTS_WORKSPACE_NAV", Some("off")).unwrap());
+        assert!(!super::toggle("KIRO_AGENTS_WORKSPACE_NAV", Some("0")).unwrap());
+        assert!(super::toggle("KIRO_AGENTS_WORKSPACE_NAV", Some("maybe")).is_err());
     }
 }

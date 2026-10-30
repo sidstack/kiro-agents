@@ -29,6 +29,30 @@ a placement chooser: v splits right, h splits below, and w opens a new window.
 Ctrl+N chooses directory and agent, then placement before starting a session.
 The first session fills the empty launcher slot; later sessions never replace an
 active Kiro or shell pane. An external attachment is never stolen.
+
+**Ctrl+J** focuses the next live session and **Ctrl+K** the previous one, across
+every workspace and window of this private server. The order is deterministic:
+workspace name, then window index, then pane index, then pane ID, and the cycle
+wraps around. Only panes that hold a live managed session take part, so shells,
+empty launchers, the dashboard popup, stale registrations and foreign panes are
+skipped; a step never creates, moves, stops or replaces a pane. If you started
+from a fullscreen pane, the destination is shown fullscreen too; otherwise the
+destination keeps its ordinary split layout. tmux handles both keys, so nothing
+is typed into Kiro.
+
+Ctrl+J and Ctrl+K are consumed inside managed session panes only. Ctrl+J is line
+feed while Enter is carriage return, so ordinary Enter and Kiro's native approval
+handling are unchanged; those two chords are no longer available to the
+application inside a managed session pane. Shell panes and the dashboard keep
+them. Set `KIRO_AGENTS_WORKSPACE_NAV=off` to remove both bindings and restore the
+native bytes:
+
+```sh
+KIRO_AGENTS_WORKSPACE_NAV=off kiro-agents workspace reload
+```
+
+Private `tmux.conf` bindings load after this toggle, so you can rebind either key
+yourself.
 To mix in plain shells, use the terminal shortcuts or these commands from a pane in
 an owned workspace:
 

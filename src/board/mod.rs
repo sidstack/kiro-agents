@@ -570,6 +570,8 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
         scan_token: 0,
         popup: navigator.is_some(),
     };
+    let mut origin_session =
+        navigator.and_then(|_| std::env::var("KIRO_AGENTS_WORKSPACE_ORIGIN_SESSION").ok());
     let mut refresh = Some(refresh_task(dir));
     let mut screen = Screen::open()?;
     let mut last_refresh = Instant::now();
@@ -577,7 +579,14 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
     while !signals.interrupted.load(Ordering::Relaxed) && terminal_connected()? {
         if let Some(result) = refresh.as_ref().and_then(|task| task.try_recv().ok()) {
             refresh = None;
+            let loaded = result.is_ok();
             dirty |= app.apply_rows(result);
+            if loaded {
+                if let Some(id) = origin_session.take() {
+                    app.board.select_id(&id);
+                    dirty = true;
+                }
+            }
         }
         dirty |= app.poll_scan();
         if dirty {

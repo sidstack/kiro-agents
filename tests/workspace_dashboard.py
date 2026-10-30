@@ -71,8 +71,8 @@ def main():
         standalone = None
         frames = bytearray()
 
-        def cli(*args):
-            return subprocess.check_output([str(binary), *args], env=env, cwd=project, timeout=15, stderr=subprocess.PIPE)
+        def cli(*args, context=None):
+            return subprocess.check_output([str(binary), *args], env=context or env, cwd=project, timeout=15, stderr=subprocess.PIPE)
 
         def tmux(*args, check=True):
             result = subprocess.run(['tmux', '-S', str(socket), *args], env=env, capture_output=True, text=True, timeout=5)
@@ -164,6 +164,11 @@ def main():
             assert second != first and len(panes()) == 2
             assert int(tmux('display-message', '-p', '-t', second, '#{pane_left}')) > int(tmux('display-message', '-p', '-t', first, '#{pane_left}'))
             open_dashboard()
+            # Initial selection follows the invoking session, not row zero.
+            press(b'\r')
+            wait(lambda: popup() is None, 'Enter on initial popup selection did not close it')
+            assert current() == second, 'Ctrl+Q initially highlighted another session'
+            open_dashboard()
             choose(rows[0]['id'], b'\r')
             wait(lambda: current() == first and popup() is None, 'Enter did not focus already attached session')
             assert len(panes()) == 2 and panes()[0].split('\t')[1] == first_frontend
@@ -189,6 +194,77 @@ def main():
             choose(rows[1]['id'], b'\r')
             wait(lambda: current() == second and popup() is None, 'cross-window focus failed')
             assert len(panes()) == 3
+            # Cycle through existing managed panes via the real client key parser.
+            def zoomed(pane):
+                return tmux('display-message', '-p', '-t', pane, '#{window_zoomed_flag}').strip() == '1'
+
+            def cycle(keys, target, fullscreen=False):
+                press(keys)
+                try:
+                    wait(lambda: current() == target, 'session cycle did not focus expected pane')
+                except AssertionError:
+                    print('CYCLE DEBUG', current(), target, tmux('show-messages'), bytes(frames[-2000:]), flush=True)
+                    raise
+                single = tmux('display-message', '-p', '-t', target, '#{window_panes}').strip() == '1'
+                assert single or zoomed(target) == fullscreen, 'cycle did not preserve origin zoom mode'
+                assert popup() is None, 'cycle opened dashboard'
+
+            cycle(b'\x0a', third)
+            cycle(b'\x0a', first)
+            cycle(b'\x0b', third)
+            cycle(b'\x0b', second)
+            press(b'\x1b[23~')
+            wait(lambda: zoomed(second), 'fullscreen setup failed')
+            cycle(b'\x0a', third, True)
+            cycle(b'\x0a', first, True)
+            cycle(b'\x0b', third, True)
+            cycle(b'\x0b', second, True)
+            press(b'\x1b[23~')
+            wait(lambda: not zoomed(second), 'split restoration failed')
+            # Popup input belongs to the dashboard, including Ctrl+K stop.
+            open_dashboard()
+            choose(rows[0]['id'], b'\x0b')
+            assert popup() is not None and current() == second, 'Ctrl+K escaped dashboard popup'
+            press(b'n')
+            press(b'\x1b')
+            wait(lambda: popup() is None, 'popup cancel failed')
+            assert all(r['state'] == 'live' for r in json.loads(cli('status', '--json')))
+            bindings = tmux('list-keys', '-T', 'root')
+            try:
+                cli('workspace', 'reload', context=dict(env, KIRO_AGENTS_WORKSPACE_NAV='invalid'))
+                raise AssertionError('invalid navigation toggle was accepted')
+            except subprocess.CalledProcessError:
+                pass
+            assert tmux('list-keys', '-T', 'root') == bindings, 'invalid toggle mutated bindings'
+            config = state / 'workspaces/tmux.conf'
+            config.write_text('unbind-key -T root C-j\n')
+            cli('workspace', 'reload')
+            assert ' C-j ' not in tmux('list-keys', '-T', 'root'), 'private override lost precedence'
+            config.unlink()
+            cli('workspace', 'reload')
+            # Disabling navigation restores native bytes, including ordinary Enter.
+            cli('workspace', 'reload', context=dict(env, KIRO_AGENTS_WORKSPACE_NAV='off'))
+            for key, code in [(b'\x0a', '0a'), (b'\x0b', '0b'), (b'\r', '0d')]:
+                press(key)
+                wait(lambda: 'BYTES:' + code in ''.join(tmux('capture-pane', '-p', '-t', second).split()),
+                     'disabled navigation or Enter did not pass through')
+                assert current() == second
+            cli('workspace', 'reload')
+            cycle(b'\x0a', third)
+            cycle(b'\x0b', second)
+            # A plain shell keeps its keyboard input with navigation enabled.
+            shell = tmux('split-window', '-h', '-P', '-F', '#{pane_id}', '-t', second, '/bin/sh').strip()
+            press(b"printf 'NAV_%s\\n' SHELL")
+            press(b'\x0a')
+            try:
+                wait(lambda: 'NAV_SHELL' in tmux('capture-pane', '-p', '-t', shell), 'shell Ctrl+J was swallowed')
+            except AssertionError:
+                print('SHELL DEBUG', repr(tmux('capture-pane', '-p', '-t', shell)), tmux('show-options', '-p', '-t', shell), flush=True)
+                raise
+            press(b'\x0b')
+            assert current() == shell, 'shell Ctrl+K navigated away'
+            tmux('kill-pane', '-t', shell)
+            wait(lambda: current() == second, 'shell cleanup changed origin')
             # Create through all three popup steps; placement must not overwrite
             # the current live session, and the host should spawn exactly once.
             open_dashboard()
