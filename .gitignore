@@ -6,3 +6,6 @@ __pycache__/
 probes/out/
 .kiro-agents/
 .DS_Store
+
+# Local agent planning and handoff notes; never shipped.
+.agents/

@@ -213,3 +213,34 @@ frontend through a private token-checked lease/socket, then uses ordinary Attach
 Never signal or kill a source process, restart the host, or change the host protocol
 for this feature. Preserve exclusive attachment, bounded release waits, old-peer
 refusal, native child PID, and token-checked cleanup of successor registrations.
+
+
+## Local project management
+
+Before starting work, read `.agents/SPEC.md`, `.agents/PLAN.md` and the recent
+entries in `.agents/JOURNAL.md`. These are local working records, not shipped
+product documentation or additional permission grants. Repository rules and the
+user's latest instructions take precedence. Confirm branch/worktree and actual
+code/CI state before relying on a recorded status.
+
+- SPEC.md: agreed scope, behavior, constraints, acceptance criteria and verified
+  decisions. Distinguish requested, implemented, tested, merged and released.
+- PLAN.md: prioritized work items, milestones, dependencies, blockers, owners and
+  worktree/branch/PR pointers. Update before changing direction and after completing
+  a milestone. Keep navigation, lifecycle and other workstreams isolated.
+- JOURNAL.md: dated concise handoffs with changes, decisions, test evidence,
+  failures/blockers and the exact next action. Record relevant user feedback;
+  never store real transcripts, auth, environments or credentials.
+
+Maintain these files as work progresses, including before handing off or ending
+a work session. The coordinator owns shared plan/journal updates; workers report
+results for integration rather than concurrently rewriting the same records.
+In linked worktrees, use the primary checkout's `.agents/` as the canonical local
+record (locate it with `git worktree list`) unless the user explicitly establishes
+separate records. If missing on another machine, bootstrap from tracked docs and
+verified repository state without claiming to have recovered previous local notes.
+
+`.agents/` is ignored and must remain local: never force-add, commit, publish or
+package it. Keep durable public requirements/backlog in `docs/BACKLOG.md`, release
+facts in release docs, and probe contradictions in `docs/FINDINGS.md`. Local notes
+must not become the only record of decisions needed to understand a PR.
