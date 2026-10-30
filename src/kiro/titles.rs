@@ -345,6 +345,7 @@ mod tests {
 
     fn session(cwd: &Path) -> SessionInfo {
         SessionInfo {
+            activity: Default::default(),
             name: None,
             title: None,
             title_source: None,

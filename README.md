@@ -90,8 +90,8 @@ kiro-agents shutdown            # stop all owned sessions and the host
 ```
 
 The board requires an interactive input and output terminal; piped output is a
-plain session list. Up/Down or j/k selects, Enter attaches, Tab switches Live/All,
-and / searches. Esc clears search or cancels a form. Ctrl+N opens a directory picker
+plain session list. Up/Down or j/k selects, Enter attaches, and / searches.
+Tab/Shift+Tab cycles All, Needs you, Working, Ready and Inactive. Esc clears search or cancels a form. Ctrl+N opens a directory picker
 with current/recent projects and recursive fuzzy search under your home directory
 (and the current directory when it is outside home), followed by a searchable
 list of native Kiro agents for the chosen directory. Type a fuzzy query and press
@@ -188,7 +188,10 @@ original feedback and validation boundaries, and the
 - After a host crash, saved live rows become `failed` on host restart; attach
   refuses them. Inspect/resume history through Kiro itself. No automatic recovery
   spawn or signals to a saved PID.
-- The board shows process liveness, with Live and All filters. Historical rows
+- The board separates process liveness from turn activity. All includes live sessions
+  with unknown activity; Needs you, Working and Ready require verified activity metadata.
+  Current hosts report unknown activity, so these three filters remain empty. Inactive
+  includes stopped/exited/failed managed sessions. Historical rows
   cannot be attached. No telemetry hooks, drafts, V3 support, or
   general settings system yet. Automatic names are best-effort and optional. No transcript or child-environment logging.
 

@@ -81,7 +81,7 @@ resume, V3, telemetry, and eviction deferred until their real probes pass.
 ## Project MVP v2
 
 The second product iteration adds a navigable session board over the existing
-V2 host: Live/All filters, search, create, confirmed stop, and return-to-board
+V2 host: lifecycle filters, search, create, confirmed stop, and return-to-board
 after native attach. Explicit CLI attach/new retain detach-to-shell. Historical
 rows explain their unattachable state. The protocol, Kiro launch flags, and
 saved-conversation boundary stay as above. See the concrete

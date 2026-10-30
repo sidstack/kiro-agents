@@ -117,3 +117,48 @@ bounds. CI uses synthetic conversations and fake Kiro; no real auth/transcripts/
 5. Merge/release only after compatibility and behavioral gates pass; unknown formats
    remain visibly unsupported. Never add history/resume claims to shipped documentation
    before both generation paths are actually implemented and verified.
+
+
+## 2026-10-28 scope update
+
+The user requested stopped/historical resume, the All / Needs you / Working /
+Ready / Inactive dashboard, and configurable inactivity as a new lifecycle batch.
+See [the lifecycle journal](journal/SESSION-LIFECYCLE.md) for the exact contract,
+completed capability checks and unresolved native verification gates. This does
+not add historical import, auto-stop, V3 launches or reliable turn-status claims
+to the shipped multiplexer. Full-text quick-open remains deferred.
+
+## 3. Configurable session capacity and resource-aware admission
+
+Requested 2026-10-29. Replace the hardcoded eight-live-session cap and dashboard
+`/8` label with a documented capacity policy. This is a backlog item; the current
+host limit remains unchanged until implementation and validation.
+
+- [ ] Add a validated host-side `maxLiveSessions` setting with a documented,
+  configurable default and an explicit unlimited/automatic mode if supported.
+  Reject invalid values rather than silently falling back. Count live owned
+  children, including detached sessions; inactive metadata does not consume slots.
+- [ ] Evaluate resource-aware admission using effective available memory (including
+  cgroup/container limits), host/ring-buffer overhead, owned child process trees
+  and a configurable safety reserve. CPU load is transient; avoid making a noisy
+  sample a hard admission rule. Do not treat one session's RSS as a reliable fixed
+  cost or promise that admission prevents OOM as native agents/tools grow later.
+- [ ] Define how the user cap and resource budget combine. An explicit hard cap
+  must remain enforceable; automatic estimates need clear reasons and a documented
+  fallback when metrics are unavailable. Do not evict or stop existing sessions
+  to meet a changed cap or reclaim resources.
+- [ ] Serialize admission with session creation in the host so concurrent clients
+  cannot exceed the configured cap. Preserve native session locks, exclusive
+  attachment and the one-live-child rule independently of resource policy.
+- [ ] Expose actual capacity and refusal reasons in dashboard/CLI metadata,
+  removing the duplicated `/8` literal. Preserve old-host compatibility and show
+  unknown capacity honestly; changing frontend settings alone must not imply that
+  a running old host changed its limit. Document when host configuration applies
+  without restarting a live host automatically.
+- [ ] Test cap increases/decreases, malformed config, simultaneous creation,
+  detached/stopped accounting, low-memory and unavailable metrics, cgroup budgets,
+  frontend/host version differences, and refusal without affecting live children.
+
+Prefer a predictable configurable hard cap as the first delivery, then an opt-in
+resource-aware policy backed by measurements. Keep this separate from navigation
+and do not make automatic inactivity a prerequisite for raising capacity.

@@ -101,6 +101,7 @@ impl Host {
             }
         });
         let info = SessionInfo {
+            activity: Default::default(),
             name: None,
             title: None,
             title_source: None,

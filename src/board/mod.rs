@@ -188,7 +188,10 @@ impl App {
                 KeyCode::Char('q') => return Some(Effect::Quit),
                 KeyCode::Up | KeyCode::Char('k') => self.board.move_selection(-1),
                 KeyCode::Down | KeyCode::Char('j') => self.board.move_selection(1),
-                KeyCode::Tab => self.board.toggle_filter(),
+                KeyCode::Tab => self
+                    .board
+                    .cycle_filter(key.modifiers.contains(KeyModifiers::SHIFT)),
+                KeyCode::BackTab => self.board.cycle_filter(true),
                 KeyCode::Char('/') => {
                     self.board.set_query(String::new());
                     self.mode = Mode::Search;
@@ -853,8 +856,9 @@ mod tests {
 
     fn app(state: &str) -> App {
         let mut board = Board::default();
-        board.all = true;
+        board.filter = crate::lifecycle::Filter::All;
         board.replace_rows(vec![SessionInfo {
+            activity: Default::default(),
             name: None,
             title: None,
             title_source: None,

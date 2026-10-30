@@ -213,3 +213,10 @@ frontend through a private token-checked lease/socket, then uses ordinary Attach
 Never signal or kill a source process, restart the host, or change the host protocol
 for this feature. Preserve exclusive attachment, bounded release waits, old-peer
 refusal, native child PID, and token-checked cleanup of successor registrations.
+
+Lifecycle batch: All / Needs you / Working / Ready / Inactive separates process
+liveness from optional activity metadata. Missing or unrecognized activity is
+Unknown, never Ready. Current hosts do not produce verified turn events. Keep
+old-host compatibility without a protocol bump or restart. Filters do not imply
+native history resume or authorize automatic idle stops; identity/generation,
+saved history and draft safety gates remain in docs/journal/SESSION-LIFECYCLE.md.

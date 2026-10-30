@@ -1,9 +1,9 @@
 ---
 source: src/board/view.rs
-expression: "render(&board, &Mode::Browse, 100, 20)"
+expression: "render(&board, &Mode::Browse, 100, 20, false)"
 ---
 ┌Kiro sessions · v<version>────────────────────────────────────────────────────────────────────────────┐
-│ ALL   0/8 live  ·  1 historical  ·  Search:                                                      │
+│ Inactive   0/8 live  ·  1 inactive  ·  Search:                                                   │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Projects and sessions─────────────────────────────────────────────────────────────────────────────┐
 │› project · reviewer · #session-one   · exited                                                    │
@@ -19,5 +19,5 @@ expression: "render(&board, &Mode::Browse, 100, 20)"
 Cannot attach: session is exited (exit 0). Use Kiro history manually or Ctrl+N for a fresh session.
 
 
-↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh
+↑/↓ j/k select · Enter attach · Tab/Shift+Tab filters · / search · r refresh
 Ctrl+N create · m move here · F2 rename · Ctrl+K stop · q/Ctrl+Q quit

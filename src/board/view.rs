@@ -32,11 +32,11 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(
-                if board.all { " ALL " } else { " LIVE " },
+                format!(" {} ", board.filter.label()),
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
-                "  {live}/8 live  ·  {} historical  ·  Search: {}",
+                "  {live}/8 live  ·  {} inactive  ·  Search: {}",
                 board.rows.len() - live,
                 board.query
             )),
@@ -66,7 +66,14 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
                         Style::default().add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" · "),
-                    Span::styled(row.state.clone(), Style::default().fg(color)),
+                    Span::styled(
+                        if row.state == "live" {
+                            format!("live · {}", row.activity.label())
+                        } else {
+                            row.state.clone()
+                        },
+                        Style::default().fg(color),
+                    ),
                 ]),
                 Line::styled(
                     format!(
@@ -98,7 +105,14 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
     let details = match mode {
         Mode::Search => format!("Search: {}\nEnter keeps filter · Esc clears", board.query),
         _ => board.selected().map_or_else(
-            || "No matching sessions. Ctrl+N creates a fresh session.".into(),
+            || {
+                if matches!(board.filter, crate::lifecycle::Filter::NeedsYou | crate::lifecycle::Filter::Working | crate::lifecycle::Filter::Ready)
+                    && board.rows.iter().any(|row| row.state == "live" && row.activity.is_unknown()) {
+                    "No verified matches. Some live sessions have unknown activity; find them in All.".into()
+                } else {
+                    "No matching sessions. Ctrl+N creates a fresh session.".into()
+                }
+            },
             |row| if row.state == "live" {
                 if popup {
                     format!("{}\nEnter focuses · Shift+Enter / f focuses fullscreen · v split right · h split below · w new window", row.cwd)
@@ -115,11 +129,11 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
     let (select_line, actions_line) = if popup {
         (
             "↑/↓ j/k select · Enter focus · Shift+Enter / f fullscreen · v/h split · w window",
-            "Ctrl+N new · m move here · F2 rename · Ctrl+K stop · / search · Esc closes popup",
+            "Ctrl+N new · m move here · F2 rename · Ctrl+K stop · Tab filters · / search · Esc closes popup",
         )
     } else {
         (
-            "↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh",
+            "↑/↓ j/k select · Enter attach · Tab/Shift+Tab filters · / search · r refresh",
             "Ctrl+N create · m move here · F2 rename · Ctrl+K stop · q/Ctrl+Q quit",
         )
     };
@@ -425,6 +439,7 @@ mod tests {
         let mut board = Board::default();
         insta::assert_snapshot!("empty", render(&board, &Mode::Browse, 100, 20, false));
         board.replace_rows(vec![SessionInfo {
+            activity: Default::default(),
             name: None,
             title: None,
             title_source: None,
@@ -440,7 +455,7 @@ mod tests {
         insta::assert_snapshot!("live", render(&board, &Mode::Browse, 100, 20, false));
         board.rows[0].state = "exited".into();
         board.rows[0].exit_code = Some(0);
-        board.toggle_filter();
+        board.filter = crate::lifecycle::Filter::Inactive;
         insta::assert_snapshot!("history", render(&board, &Mode::Browse, 100, 20, false));
         insta::assert_snapshot!(
             "create",
@@ -483,6 +498,7 @@ mod tests {
     fn floating_dashboard_and_placement_picker_render() {
         let mut board = Board::default();
         board.replace_rows(vec![SessionInfo {
+            activity: Default::default(),
             name: None,
             title: None,
             title_source: None,

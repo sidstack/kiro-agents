@@ -4,6 +4,7 @@ pub mod custom_names;
 pub mod features;
 pub mod host;
 pub mod kiro;
+pub mod lifecycle;
 pub mod protocol;
 mod workspace;
 
