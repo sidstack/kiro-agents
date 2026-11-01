@@ -122,3 +122,51 @@ Kiro exits `4` when a named agent is unavailable on the selected engine. Map tha
 | Abort a turn | `SIGINT` to the child's process group | Kiro's own cancel semantics apply |
 | Stop a session | `SIGTERM`, then reap | row becomes `stopped`; restorable by resume |
 | Delete a Kiro session | `kiro-cli chat --delete-session <id>` | only on explicit user request, with confirm |
+
+## History quick-open: finding a stored conversation and resuming it
+
+`Ctrl+O` in the board opens a read-only quick-open over conversations Kiro already
+stored on this machine. It is the only path from history to a live session, and a
+resume is always an explicit Enter on one row.
+
+**Where rows come from.** Kiro's own listing needs auth, so it cannot answer an
+offline board (see `docs/FINDINGS.md`). The adapters read Kiro's stores directly
+and read-only:
+
+| Store | Layout | Resume here |
+| --- | --- | --- |
+| `v1` per-session file store | `<sessions>/cli/<id>.json` metadata, `<id>.jsonl`/`<id>.history` bounded transcript, `<id>.lock` | yes |
+| `v2` per-workspace store | `<sessions>/<workspace-hash>/sess_<uuid>/session.json` (also `cli_<uuid>` imported rows) | listed, not resumed |
+
+A row that appears in both stores is one row with both provenances. Unknown schemas
+are counted as unrecognised in the coverage line, never guessed.
+
+**Search.** One ranker is shared with the directory and agent pickers
+(`src/fuzzy.rs`). Terms must all match; each matches a substring or a fuzzy
+subsequence of the title, project, directory, agent, native id, or bounded prompt
+text. Snippets show the matching role and window.
+
+**Resume.** Only the `v1` file store is resumable by this wrapper: `kiro-cli chat
+--v2 --tui --resume-id <id>` runs in the recorded project directory. Only an id
+whose shape Kiro itself recognises (native UUID) is ever placed on a command line.
+The child is an ordinary supervised session, so attach, Ctrl+Q detach, rename and
+stop behave as for a new session, and the resume id is recorded as metadata.
+
+**Refusals.** Enter reports a reason instead of acting when the conversation is held
+by a live Kiro lock, the lock cannot be read, the recorded project directory is gone,
+or the row exists only in the newer per-workspace store. A stale or dead lock is
+stated, then ordinary rules apply. A foreign process is never taken over and its lock
+file is never removed or rewritten. A conversation already supervised by one of our
+sessions resumes once and is then attachable, not duplicated. Nothing is replayed,
+re-run, migrated or written into Kiro's stores.
+
+**Budgets.** 2000 conversations, 2000 records, 128 KiB per metadata file, 32 KiB per
+transcript, 8 MiB of text overall, and a five-second scan deadline. The footer states
+which stores were searched, how many rows and texts were read, and any truncation,
+unrecognised or skipped-store counts, so a partial view is never mistaken for the
+whole history.
+
+**Privacy.** Titles, ids, dates and bounded prompt text are used in memory for
+ranking and snippets only; credential-looking snippets are redacted and control
+characters are stripped before rendering. The registry stores only the native
+conversation id. Transcripts are never logged, and native stores are never written.

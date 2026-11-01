@@ -1,3 +1,4 @@
+pub mod history;
 pub mod titles;
 
 use portable_pty::CommandBuilder;
@@ -29,6 +30,17 @@ pub fn launch(cwd: &str, agent: Option<&str>) -> CommandBuilder {
     if let Some(agent) = agent {
         command.args(["--agent", agent]);
     }
+    command.cwd(cwd);
+    command
+}
+
+/// Explicit user-requested resume of one Kiro conversation. Kiro's own help
+/// advertises `--resume-id <SESSION_ID>`; the wrapper adds the same explicit
+/// V2 engine selection it always passes and never mixes in another generation.
+/// The resumed profile stays Kiro's: no `--agent` is invented here.
+pub fn resume(cwd: &str, native_id: &str) -> CommandBuilder {
+    let mut command = CommandBuilder::new(executable());
+    command.args(["chat", "--v2", "--tui", "--resume-id", native_id]);
     command.cwd(cwd);
     command
 }

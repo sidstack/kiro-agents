@@ -2,6 +2,7 @@
 """Deterministic PTY peer. Never reads Kiro state, credentials, or a network."""
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -56,8 +57,24 @@ if pid_dir:
     from pathlib import Path
     Path(pid_dir, os.environ.get("KIRO_AGENTS_FAKE_ROOT_PID", str(os.getpid()))).write_text(str(os.getpid()))
 assert "--trust-all-tools" not in sys.argv
-assert "--resume-id" not in sys.argv
+# Resume is only ever an explicit user action. The argv shape is asserted so a
+# wrapper regression can never start resuming conversations on its own, and the
+# engine/session flags the wrapper must never pass are refused outright.
+resume_id = None
+if "--resume-id" in sys.argv:
+    at = sys.argv.index("--resume-id")
+    # A resume run carries the id and nothing else beyond the fixed flags.
+    assert at == 4 and len(sys.argv) == 6, sys.argv
+    assert re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        sys.argv[at + 1],
+    ), sys.argv
+    resume_id = sys.argv[at + 1]
+for forbidden in ("--v3", "--agent-engine", "--resume-picker", "--sessions", "--cloud", "--v1"):
+    assert forbidden not in sys.argv, sys.argv
 agent = sys.argv[sys.argv.index("--agent") + 1] if "--agent" in sys.argv else None
+if resume_id:
+    assert agent is None, "a resumed conversation keeps Kiro's own profile"
 if agent == "missing":
     sys.exit(4)
 if FIXTURE and agent is not None and agent not in fixture_names():
@@ -73,9 +90,10 @@ def size(*_):
 
 
 signal.signal(signal.SIGWINCH, size)
+label = f"resume:{resume_id}" if resume_id else (agent or "default")
 os.write(
     1,
-    f"\x1b[32mREADY:{os.getpid()}:{os.getcwd()}:{agent or 'default'}\x1b[0m\n".encode(),
+    f"\x1b[32mREADY:{os.getpid()}:{os.getcwd()}:{label}\x1b[0m\n".encode(),
 )
 while True:
     data = os.read(0, 4096)

@@ -13,6 +13,7 @@ check:
 	python3 tests/board_picker.py
 	python3 tests/board_search.py
 	python3 tests/board_naming.py
+	python3 tests/board_history.py
 	python3 tests/naming_upgrade.py
 	python3 tests/workspace.py
 	python3 tests/workspace_dashboard.py

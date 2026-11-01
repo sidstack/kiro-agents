@@ -67,10 +67,15 @@ impl Host {
         Ok(())
     }
 
-    fn new_session(
+    /// Start one native Kiro process. `native_id` is set only for an explicit
+    /// user-requested resume of a conversation Kiro already owns; a fresh
+    /// launch never selects or replays Kiro history.
+    fn start(
         &mut self,
         cwd: String,
         agent: Option<String>,
+        native_id: Option<String>,
+        command: portable_pty::CommandBuilder,
     ) -> Result<(SessionInfo, Box<dyn Read + Send>)> {
         let cwd = fs::canonicalize(cwd)?;
         anyhow::ensure!(cwd.is_dir(), "Project path is not a directory");
@@ -82,14 +87,23 @@ impl Host {
             self.sessions.values().filter(|s| s.child.is_some()).count() < MAX_SESSIONS,
             "MVP limit: {MAX_SESSIONS} live sessions"
         );
-        // Fresh launches only. Wrapper IDs never select or resume Kiro history.
+        // One live child per Kiro session id: an already supervised conversation
+        // is never started twice.
+        if let Some(native) = native_id.as_deref() {
+            if let Some(existing) = self.sessions.values().find(|session| {
+                session.child.is_some() && session.info.native_id.as_deref() == Some(native)
+            }) {
+                anyhow::bail!(
+                    "That conversation is already supervised as session {}; attach it instead",
+                    existing.info.id
+                );
+            }
+        }
         let id = uuid::Uuid::new_v4().simple().to_string()[..12].to_owned();
         let pair = native_pty_system().openpty(size(80, 24))?;
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
-        let child = pair
-            .slave
-            .spawn_command(kiro::launch(&cwd, agent.as_deref()))?;
+        let child = pair.slave.spawn_command(command)?;
         drop(pair.slave);
         let (input_tx, input_rx) = mpsc::sync_channel::<Vec<u8>>(16);
         thread::spawn(move || {
@@ -104,6 +118,7 @@ impl Host {
             name: None,
             title: None,
             title_source: None,
+            native_id,
             id: id.clone(),
             cwd,
             agent,
@@ -139,6 +154,48 @@ impl Host {
         Ok((info, reader))
     }
 
+    fn new_session(
+        &mut self,
+        cwd: String,
+        agent: Option<String>,
+    ) -> Result<(SessionInfo, Box<dyn Read + Send>)> {
+        let command = kiro::launch(&cwd, agent.as_deref());
+        self.start(cwd, agent, None, command)
+    }
+
+    /// Resume one native conversation the user chose explicitly. Kiro owns the
+    /// conversation, its profile and its locks: the wrapper only verifies that
+    /// nothing already supervises it, then hands the exact id to Kiro's own
+    /// resume flag in the conversation's recorded directory.
+    fn resume_session(
+        &mut self,
+        cwd: String,
+        native_id: String,
+    ) -> Result<(SessionInfo, Box<dyn Read + Send>)> {
+        anyhow::ensure!(
+            kiro::history::is_resumable_native_id(&native_id),
+            "Kiro did not state a resume-capable session id for that row"
+        );
+        anyhow::ensure!(
+            Path::new(&cwd).is_dir(),
+            "Project directory {cwd} is no longer available; restore it or start a fresh session elsewhere"
+        );
+        let roots = kiro::history::StoreRoots::from_env();
+        if let Some(directory) = &roots.files {
+            match kiro::history::lock_state(directory, &native_id) {
+                kiro::history::LockState::Open { pid } => anyhow::bail!(
+                    "Kiro already has this conversation open (pid {pid}); use it there or close it first"
+                ),
+                kiro::history::LockState::Unknown => anyhow::bail!(
+                    "Kiro's lock for that conversation could not be read; resuming could duplicate a live session"
+                ),
+                _ => (),
+            }
+        }
+        let command = kiro::resume(&cwd, &native_id);
+        self.start(cwd, None, Some(native_id), command)
+    }
+
     fn rename(&mut self, id: &str, name: Option<String>) -> Result<()> {
         let name = name
             .map(|name| crate::features::validate_name(&name))
@@ -163,6 +220,16 @@ impl Host {
         {
             if session.info.name.is_some() {
                 continue;
+            }
+            if session.info.native_id.is_none() {
+                if let Some(native_id) = self
+                    .features
+                    .iter()
+                    .find_map(|feature| feature.native_id(&session.info))
+                {
+                    session.info.native_id = Some(native_id);
+                    changed = true;
+                }
             }
             for feature in &self.features {
                 if let Some(title) = feature.title(&session.info) {
@@ -365,6 +432,14 @@ fn handle(mut stream: UnixStream, shared: Shared) -> Result<()> {
                 .lock()
                 .map_err(|_| anyhow!("Host lock poisoned"))?
                 .new_session(cwd, agent)?;
+            supervise(shared.clone(), info.id.clone(), pty_reader);
+            Ok(Reply::Created(Box::new(info)))
+        }
+        Action::Resume { cwd, native_id } => {
+            let (info, pty_reader) = shared
+                .lock()
+                .map_err(|_| anyhow!("Host lock poisoned"))?
+                .resume_session(cwd, native_id)?;
             supervise(shared.clone(), info.id.clone(), pty_reader);
             Ok(Reply::Created(Box::new(info)))
         }
