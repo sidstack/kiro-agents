@@ -155,9 +155,12 @@ stop behave as for a new session, and the resume id is recorded as metadata.
 **Older hosts.** `Resume` is the first action added to protocol v1, so a host that
 was already running before this build was installed cannot parse the request and
 closes the connection without replying (verified in `docs/FINDINGS.md`). The board
-then states that the running host predates history resume and names the one user
-action — `kiro-agents shutdown`, which stops its managed sessions — instead of
-showing a transport error. The board never restarts or replaces a host by itself.
+then probes the host once with an action it cannot name: a current host always
+answers, an older one also closes. It states the diagnosis that matches — an older
+host is told to update (via `kiro-agents shutdown`, which stops its managed
+sessions), while a current host that closed mid-request is reported as an unknown
+outcome to check against the session list. The board never restarts or replaces a
+host by itself.
 
 **Refusals.** Enter reports a reason instead of acting when the conversation is held
 by a live Kiro lock, the lock cannot be read, the recorded project directory is gone,
@@ -167,7 +170,8 @@ file is never removed or rewritten. A conversation already supervised by one of 
 sessions resumes once and is then attachable, not duplicated. Nothing is replayed,
 re-run, migrated or written into Kiro's stores.
 
-**Budgets.** 2000 conversations, 20 000 directory entries, 128 KiB per metadata
+**Budgets.** 2000 conversations and 20 000 *inspected* directory entries (every
+entry a scan looks at costs budget, not just matching ones), 128 KiB per metadata
 file, 32 KiB per transcript, 8 MiB of text overall, and a ten-second scan deadline
 enforced inside the adapters, not just between them, so closing the picker cannot
 join a runaway scan. The footer states

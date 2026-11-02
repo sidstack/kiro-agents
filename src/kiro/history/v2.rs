@@ -85,6 +85,12 @@ impl StoreAdapter for WorkspaceStore {
                     into.partial = true;
                     return;
                 }
+                // Charge every inspected entry, not just shaped ones, so a
+                // workspace full of unrelated files cannot outrun the bound.
+                if !budget.take_entry(into) {
+                    // Out of entry budget: process what was collected.
+                    break;
+                }
                 let path = entry.path();
                 let shaped = path
                     .file_name()
@@ -96,10 +102,6 @@ impl StoreAdapter for WorkspaceStore {
                     });
                 if !shaped {
                     continue;
-                }
-                if !budget.take_entry(into) {
-                    // Out of entry budget: process what was collected.
-                    break;
                 }
                 sessions.push(path);
             }
@@ -244,6 +246,46 @@ mod tests {
         assert!(record.text.is_empty());
         assert_eq!(record.lock, LockState::Unknown);
         assert!(record.unusable.is_some());
+    }
+
+    #[test]
+    fn the_entry_budget_charges_unrelated_session_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = "874b7102139062fc";
+        for index in 0..5 {
+            let uuid = format!("{index:08}-1111-4111-8111-111111111111");
+            write_session(
+                root.path(),
+                workspace,
+                &format!("sess_{uuid}"),
+                &format!(
+                    r#"{{"schemaVersion":"1.0.0","dataModelVersion":1,"id":"sess_{uuid}","title":"row","workspacePaths":["/home/siddu/project"],"rootPaths":["/home/siddu/project"],"createdAt":"2026-10-27T10:59:23.051Z","lastModifiedAt":"2026-10-27T10:59:37.689Z"}}"#
+                ),
+            );
+        }
+        // Unrelated entries in the workspace directory must cost budget too.
+        for index in 0..5 {
+            fs::write(
+                root.path()
+                    .join(workspace)
+                    .join(format!("notes-{index}.txt")),
+                "not a session",
+            )
+            .unwrap();
+        }
+        let cancelled = AtomicBool::new(false);
+        let mut scan = Scan::default();
+        let mut budget = Budget {
+            entries: 6,
+            conversations: 2_000,
+            text_bytes: 6 * 1024 * 1024,
+            deadline: None,
+        };
+        WorkspaceStore::new(root.path().to_path_buf()).scan(&mut budget, &cancelled, &mut scan);
+        // One workspace plus ten workspace entries were inspected; only six
+        // were affordable, whatever the directory order.
+        assert!(scan.truncated, "{scan:?}");
+        assert!(scan.conversations.len() <= 5, "{scan:?}");
     }
 
     #[test]

@@ -422,8 +422,10 @@ state directory, fake CLI only, no real Kiro state:
   a temp directory, connect to `host.sock`, send the frame above followed by a
   newline, and read: EOF with no reply, while the same frame against the current
   host returns `Created`.
-- This build does not revive an old host: it cannot be patched in place. The board
-  translates the no-reply outcome into an explicit message naming
-  `kiro-agents shutdown` as the only user action, never restarts a host itself, and
-  a new host that cannot name a request now answers `Reply::Error` instead of
-  closing the connection (`tests/lifecycle.rs`, `tests/history_legacy.py`).
+- This build does not revive an old host: it cannot be patched in place. A
+  resume that closes without a reply is diagnosed with a one-shot capability
+  probe (an unnameable action: a current host answers `Reply::Error`, an older
+  one also closes), so the board names `kiro-agents shutdown` only for a host
+  that provably predates resume, and otherwise reports the outcome as unknown
+  (`tests/lifecycle.rs`, `tests/history_legacy.py`). The board never restarts
+  a host itself.

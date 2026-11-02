@@ -63,13 +63,16 @@ impl StoreAdapter for FileStore {
                 into.partial = true;
                 return;
             }
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
+            // Every inspected directory entry is charged, not just the
+            // matching ones: a huge directory of irrelevant files cannot
+            // outrun the advertised bound before parsing starts.
             if !budget.take_entry(into) {
                 // Out of entry budget: process what was collected, don't drop it.
                 break;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
             }
             paths.push(path);
         }
@@ -498,19 +501,48 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let mut scan = Scan::default();
         let mut budget = Budget {
-            entries: 3,
+            entries: 20_000,
             conversations: 3,
             text_bytes: 100 * 1024,
             deadline: None,
         };
         FileStore::new(directory.to_path_buf()).scan(&mut budget, &cancelled, &mut scan);
         assert_eq!(scan.conversations.len(), 3, "{scan:?}");
-        assert!(scan.truncated);
         assert!(
             scan.partial,
             "text budget exhaustion must be visible, not a silent full scan"
         );
         assert!(scan.conversations.iter().any(|row| !row.transcript));
+    }
+
+    #[test]
+    fn the_entry_budget_charges_every_inspected_directory_entry() {
+        let store = tempfile::tempdir().unwrap();
+        let directory = store.path();
+        for index in 0..5 {
+            let id = format!("{:08}-0000-4000-8000-00000000000{}", index, index);
+            write(
+                directory,
+                &format!("{id}.json"),
+                &metadata(&id, "/tmp", Some("row")),
+            );
+            // Unrelated files must still cost budget: a directory full of
+            // them cannot outrun the advertised entry bound.
+            write(directory, &format!("notes-{index}.txt"), "not a session");
+        }
+        let cancelled = AtomicBool::new(false);
+        let mut scan = Scan::default();
+        let mut budget = Budget {
+            entries: 5,
+            conversations: 2_000,
+            text_bytes: 6 * 1024 * 1024,
+            deadline: None,
+        };
+        FileStore::new(directory.to_path_buf()).scan(&mut budget, &cancelled, &mut scan);
+        // Ten entries were inspected, only five were affordable, whatever
+        // the directory order: truncation is always visible.
+        assert!(scan.truncated, "{scan:?}");
+        assert!(scan.conversations.len() <= 5, "{scan:?}");
     }
 
     #[test]
