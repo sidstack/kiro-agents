@@ -187,13 +187,54 @@ fn text_score(term: &str, text: &str) -> Option<usize> {
     None
 }
 
-/// Case-insensitive character search returning the byte offset.
+/// Case-insensitive search returning a byte offset into `text` itself.
+///
+/// Case folding is not byte preserving: `to_lowercase` can change length, so a
+/// match offset inside the lowered text is not an offset into the original and
+/// slicing the original at it can land inside a character and panic (U+0130
+/// "İ" folds to "i" plus a combining dot, two characters and three bytes from
+/// two). Every folded character therefore remembers the byte offset of the
+/// character it came from, and the returned offset is always a character
+/// boundary of `text`.
 fn find(text: &str, term: &str) -> Option<usize> {
     if term.is_empty() {
         return Some(0);
     }
-    let lower = text.to_lowercase();
-    lower.find(&term.to_lowercase())
+    CaseFolded::new(text).find(term)
+}
+
+/// A lowercased view of a string that maps each folded character back to the
+/// byte offset of the source character it was produced from.
+struct CaseFolded {
+    lowered: String,
+    /// One entry per character of `lowered`.
+    source: Vec<usize>,
+}
+
+impl CaseFolded {
+    fn new(text: &str) -> Self {
+        let mut lowered = String::with_capacity(text.len());
+        let mut source = Vec::new();
+        for (at, ch) in text.char_indices() {
+            for folded in ch.to_lowercase() {
+                lowered.push(folded);
+                source.push(at);
+            }
+        }
+        Self { lowered, source }
+    }
+
+    fn find(&self, term: &str) -> Option<usize> {
+        let byte_at = self.lowered.find(&term.to_lowercase())?;
+        // A byte offset in the lowered view is a character boundary of that
+        // view, so counting to it is safe; the mapped source offset is a
+        // boundary of the original text.
+        let folded_at = self.lowered[..byte_at].chars().count();
+        // A fold can expand, so a term may start inside a folded sequence; the
+        // whole source character is then the match, which stays honest for the
+        // word-start test and the snippet window.
+        self.source.get(folded_at).copied()
+    }
 }
 
 fn is_word_start(text: &str, at: usize) -> bool {
@@ -215,7 +256,7 @@ pub fn snippet_for(record: &Conversation, query: &str) -> Option<Snippet> {
         .find(|run| find(&run.text, term).is_some())?;
     let at = find(&run.text, term)?;
     let chars: Vec<char> = run.text.chars().collect();
-    // Byte offset to char index by re-scanning the bounded window around it.
+    // `find` returns an offset into this same text, so slicing at it is safe.
     let char_at = run.text[..at].chars().count();
     let start = char_at.saturating_sub(SNIPPET_WINDOW);
     let end = (char_at + term.chars().count() + SNIPPET_WINDOW).min(chars.len());
@@ -448,6 +489,87 @@ mod tests {
         );
         let snippet = snippet_for(&escape, "needle").unwrap();
         assert!(!snippet.text.contains('\u{1b}'), "{:?}", snippet.text);
+    }
+
+    #[test]
+    fn a_fold_that_grows_never_slices_the_original_text_mid_character() {
+        // U+0130 lowercases to two characters, so the lowered text is a byte
+        // longer than the source. Slicing the source at the lowered offset
+        // used to land inside "é" and panic while building the snippet.
+        assert_eq!(find("İ café", "é"), Some(6));
+        // The neighbour the band decision sees is the "f" of café, read from
+        // the original text rather than a byte past a character boundary.
+        assert!(!is_word_start("İ café", find("İ café", "é").unwrap()));
+        // A byte offset from the lowered view pointed two bytes too far ahead.
+        assert_eq!(find("İ İstanbul needle", "NEEDLE"), Some(13));
+
+        let row = record(
+            "88888888-8888-4888-8888-888888888888",
+            "İstanbul",
+            "/tmp",
+            None,
+            &[("prompt", "İ café and a résumé")],
+            1,
+        );
+        let snippet = snippet_for(&row, "é").unwrap();
+        assert!(snippet.text.contains("café"), "{}", snippet.text);
+    }
+
+    #[test]
+    fn every_text_match_offset_is_a_character_boundary_of_the_text() {
+        let texts = [
+            "İ café and a résumé",
+            "İ😀needle in a transcript",
+            "ẛǅﬁ needle tail",
+            "İ\u{1b}[31méx needle",
+            "İéİéİé needle",
+            "🏳️‍🌈 ünïcödé needle",
+        ];
+        let terms = ["needle", "NEEDLE", "é", "İ", "caf", "ünï", "n"];
+        for text in texts {
+            for term in terms {
+                let Some(at) = find(text, term) else { continue };
+                assert!(text.is_char_boundary(at), "{text:?} {term:?} {at}");
+                // The offset really points at the match, so the word-start
+                // test and the snippet window look at the right neighbour.
+                assert!(
+                    text[at..].to_lowercase().starts_with(&term.to_lowercase()),
+                    "{text:?} {term:?} {at} -> {:?}",
+                    &text[at..]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_word_start_band_reads_the_original_text_not_the_folded_one() {
+        // Both offsets are inside the original text now, so the character
+        // before the match is the one the band decision considers, and slicing
+        // to it never lands mid-character (the "é" case used to panic here).
+        assert_eq!(text_score("needle", "a needle here"), Some(WORD_START));
+        assert_eq!(text_score("needle", "aİneedle here"), Some(SUBSTRING));
+        // The lowered text is a byte longer, so the old offset pointed inside
+        // "and" and lost the word start that the original text has.
+        assert_eq!(text_score("and", "İ and"), Some(WORD_START));
+        assert_eq!(text_score("é", "İ café"), Some(SUBSTRING));
+    }
+
+    #[test]
+    fn snippets_stay_centred_on_the_real_match_in_unicode_text() {
+        let body = format!("{}İ😀needle{}", "ünïcödé ".repeat(60), " tail".repeat(40));
+        let row = record(
+            "99999999-9999-4999-8999-999999999999",
+            "Unicode transcript",
+            "/tmp",
+            None,
+            &[("prompt", &body)],
+            1,
+        );
+        let snippet = snippet_for(&row, "needle").unwrap();
+        assert!(snippet.text.contains('İ'), "{}", snippet.text);
+        assert!(snippet.text.contains("needle"), "{}", snippet.text);
+        assert!(snippet.text.starts_with('…'));
+        assert!(snippet.text.chars().count() <= MAX_SNIPPET_CHARS + 2);
     }
 
     #[test]

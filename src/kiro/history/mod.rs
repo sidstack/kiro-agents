@@ -25,7 +25,7 @@ use std::{
         Arc,
     },
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime},
 };
 
 /// Conversations kept from one scan; newer ones win when the budget is hit.
@@ -450,16 +450,33 @@ pub(crate) fn read_json_bounded(path: &std::path::Path, limit: u64) -> Option<Va
 
 /// Observed lock content is `{"pid": <number>, "started_at": <text>}`.
 /// Anything else is `Unknown`, never a guess.
+///
+/// Only a provably absent lock file is `Free`. A lock this function cannot
+/// stat, cannot classify as a regular file, or cannot date is `Unknown`: an
+/// unreadable or unusual lock must never be read as an invitation to start a
+/// second process on the same conversation.
 pub(crate) fn lock_state(directory: &std::path::Path, native_id: &str) -> LockState {
     let path = directory.join(format!("{native_id}.lock"));
     let info = match fs::symlink_metadata(&path) {
         Ok(info) => info,
-        Err(_) => return LockState::Free,
+        // The store says the conversation is unlocked only when it says so.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return LockState::Free,
+        // Permission denied, I/O errors, a non-directory path component or a
+        // symlink loop say nothing about whether a Kiro process holds this
+        // conversation, so nothing is assumed.
+        Err(_) => return LockState::Unknown,
     };
+    // Kiro's lock is a regular file. A symlink, directory, socket or FIFO in
+    // its place is not Kiro's lock and is never treated as an absent one.
     if !info.is_file() {
-        return LockState::Free;
+        return LockState::Unknown;
     }
-    let modified = info.modified().unwrap_or(UNIX_EPOCH);
+    // Without a modification time the staleness comparison below would compare
+    // against the epoch and call any lock stale, so the state stays unknown.
+    let modified = match info.modified() {
+        Ok(modified) => modified,
+        Err(_) => return LockState::Unknown,
+    };
     let Some(pid) = read_json_bounded(&path, 4 * 1024)
         .and_then(|value| value.get("pid").and_then(Value::as_u64))
         .and_then(|pid| u32::try_from(pid).ok())
@@ -494,6 +511,108 @@ pub fn is_resumable_native_id(native_id: &str) -> bool {
             }
         })
         && matches!(bytes.get(14), Some(b'4'))
+}
+
+/// Why a host may not resume a caller-supplied conversation id, or `None` when
+/// Kiro's own file store vouches for the request.
+///
+/// A board row is a request, not a verification: it crossed an IPC boundary and
+/// may be stale, hand-made or aimed at a store this wrapper cannot resume. So
+/// the host re-reads the store before any child is spawned. The id must be a
+/// UUID, the file store must hold a regular, parseable record that states that
+/// same id as its own, the directory must be the one Kiro recorded for that
+/// conversation, and the lock must not be open or unreadable. A conversation
+/// that only the newer per-workspace store mentions never reaches a command
+/// line, and nothing here writes into a native store.
+pub fn resume_refusal(roots: &StoreRoots, native_id: &str, cwd: &str) -> Option<String> {
+    if !is_resumable_native_id(native_id) {
+        return Some(
+            "Kiro did not state a resume-capable session id for that row; nothing is invented."
+                .into(),
+        );
+    }
+    let Some(directory) = roots.files.as_ref() else {
+        return Some(
+            "No native Kiro session store is available to verify that conversation.".into(),
+        );
+    };
+    // Symlinked store metadata is never followed, and an oversized record is
+    // never parsed: provenance comes from Kiro's own file, not from a name.
+    let path = directory.join(format!("{native_id}.json"));
+    let info =
+        match fs::symlink_metadata(&path) {
+            Ok(info) if info.is_file() => info,
+            Ok(_) => {
+                return Some(
+                    "Kiro's file store does not hold a regular record of that conversation".into(),
+                )
+            }
+            Err(_) => return Some(
+                "Kiro's file store holds no readable record of that conversation; a newer-store \
+                 conversation is not resumable by this wrapper."
+                    .into(),
+            ),
+        };
+    let metadata = match read_json_bounded(&path, MAX_METADATA_BYTES) {
+        Some(metadata) if info.len() <= MAX_METADATA_BYTES => metadata,
+        _ => {
+            return Some(
+                "Kiro's record of that conversation is too large or malformed to verify".into(),
+            )
+        }
+    };
+    // The record must state the identity itself; a filename alone is never
+    // treated as a conversation.
+    if metadata.get("session_id").and_then(Value::as_str) != Some(native_id) {
+        return Some(
+            "Kiro's record for that id does not state the same conversation; nothing is resumed \
+             on an unverified identity."
+                .into(),
+        );
+    }
+    let recorded = metadata
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|cwd| !cwd.is_empty() && !cwd.chars().any(char::is_control));
+    let Some(recorded) = recorded else {
+        return Some(
+            "Kiro did not record a project directory for that conversation; start a fresh \
+             session in a chosen directory instead."
+                .into(),
+        );
+    };
+    // The child runs in the directory Kiro recorded, not in whichever directory
+    // the caller asks for.
+    if !same_directory(recorded, cwd) {
+        return Some(format!(
+            "Kiro recorded {recorded} for that conversation; {cwd} is not that directory, so the \
+             resume is refused."
+        ));
+    }
+    match lock_state(directory, native_id) {
+        LockState::Open { pid } => Some(format!(
+            "Kiro already has this conversation open (pid {pid}); use it there or close it first"
+        )),
+        LockState::Unknown => Some(
+            "Kiro's lock for that conversation could not be read; resuming could duplicate a \
+             live session"
+                .into(),
+        ),
+        LockState::Free | LockState::Stale { .. } => None,
+    }
+}
+
+/// Whether a caller's directory is the one the store recorded. Identical text
+/// always matches; otherwise both sides must canonicalise to the same existing
+/// directory, and a path that cannot be resolved never matches by guesswork.
+fn same_directory(recorded: &str, requested: &str) -> bool {
+    if recorded == requested {
+        return true;
+    }
+    match (fs::canonicalize(recorded), fs::canonicalize(requested)) {
+        (Ok(recorded), Ok(requested)) => recorded == requested,
+        _ => false,
+    }
 }
 
 /// The UUID part of a store identifier, used only to recognise that two
@@ -588,6 +707,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn native_ids_are_uuids_and_nothing_else_is_put_on_a_command_line() {
@@ -687,6 +807,160 @@ mod tests {
             lock_state(dir.path(), id),
             LockState::Stale { pid: 4294967295 }
         );
+    }
+
+    #[test]
+    fn an_unstatable_or_unusual_lock_fails_closed_instead_of_looking_free() {
+        let store = tempfile::tempdir().unwrap();
+        let directory = store.path();
+        let id = "11111111-1111-4111-8111-111111111111";
+        // A genuinely absent lock file is the only thing that reads as free.
+        assert_eq!(lock_state(directory, id), LockState::Free);
+        // A symlink in the lock's place is not Kiro's lock, and neither is a
+        // directory or any other non-regular entry: resuming could duplicate a
+        // live conversation, so the state stays unknown.
+        let target = store.path().join("elsewhere.lock");
+        fs::write(&target, r#"{"pid":1,"started_at":"fixture"}"#).unwrap();
+        std::os::unix::fs::symlink(&target, directory.join(format!("{id}.lock"))).unwrap();
+        assert_eq!(lock_state(directory, id), LockState::Unknown);
+        fs::remove_file(directory.join(format!("{id}.lock"))).unwrap();
+        fs::create_dir(directory.join(format!("{id}.lock"))).unwrap();
+        assert_eq!(lock_state(directory, id), LockState::Unknown);
+        fs::remove_dir(directory.join(format!("{id}.lock"))).unwrap();
+        // A lock that cannot be opened is unknown even though it was statable.
+        let locked = directory.join(format!("{id}.lock"));
+        fs::write(&locked, r#"{"pid":1,"started_at":"fixture"}"#).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        assert_eq!(lock_state(directory, id), LockState::Unknown);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::remove_file(&locked).unwrap();
+        // A stat error that is not "absent" says nothing about the lock: the
+        // path component below is a plain file, so the store is ENOTDIR.
+        let not_a_directory = directory.join("a-file");
+        fs::write(&not_a_directory, "not a store").unwrap();
+        assert_eq!(lock_state(&not_a_directory, id), LockState::Unknown);
+    }
+
+    /// A conversation record as Kiro's own file store holds it.
+    fn store_record(directory: &std::path::Path, id: &str, cwd: &str) {
+        fs::write(
+            directory.join(format!("{id}.json")),
+            format!(
+                r#"{{"session_id":"{id}","cwd":"{cwd}","created_at":"2026-10-16T23:07:53Z","updated_at":"2026-10-27T10:59:37Z","title":"Repair the picker"}}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn resume_needs_the_file_store_to_vouch_for_the_id_and_the_directory() {
+        let store = tempfile::tempdir().unwrap();
+        let directory = store.path().join("sessions/cli");
+        fs::create_dir_all(&directory).unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let project_dir = project.path().to_str().unwrap().to_owned();
+        let id = "11111111-1111-4111-8111-111111111111";
+        let roots = StoreRoots {
+            files: Some(directory.clone()),
+            workspaces: None,
+        };
+        // No store record at all: an id that only a caller mentions is refused,
+        // which is also what keeps a newer-store conversation off the argv.
+        assert!(resume_refusal(&roots, id, &project_dir)
+            .unwrap()
+            .contains("no readable record"));
+        store_record(&directory, id, &project_dir);
+        assert_eq!(resume_refusal(&roots, id, &project_dir), None);
+        // The directory must be the one Kiro recorded for that conversation.
+        let reason = resume_refusal(&roots, id, other.path().to_str().unwrap()).unwrap();
+        assert!(reason.contains("is not that directory"), "{reason}");
+        // The same directory reached by another path still matches, because
+        // both sides resolve to one existing directory.
+        let via_symlink = store.path().join("link-to-project");
+        std::os::unix::fs::symlink(project.path(), &via_symlink).unwrap();
+        assert_eq!(
+            resume_refusal(&roots, id, via_symlink.to_str().unwrap()),
+            None
+        );
+        // A path that resolves to nothing never matches by guesswork.
+        assert!(resume_refusal(&roots, id, "/definitely/not/here")
+            .unwrap()
+            .contains("is not that directory"));
+        // Identity must be stated by the record, not just by its file name.
+        fs::write(
+            directory.join(format!("{id}.json")),
+            format!(
+                r#"{{"session_id":"22222222-2222-4222-8222-222222222222","cwd":"{project_dir}"}}"#
+            ),
+        )
+        .unwrap();
+        assert!(resume_refusal(&roots, id, &project_dir)
+            .unwrap()
+            .contains("unverified identity"));
+        // A record without a directory, and a record whose metadata is not a
+        // regular file, are both refused rather than resumed somewhere.
+        store_record(&directory, id, &project_dir);
+        fs::write(
+            directory.join(format!("{id}.json")),
+            r#"{"session_id":"11111111-1111-4111-8111-111111111111"}"#,
+        )
+        .unwrap();
+        assert!(resume_refusal(&roots, id, &project_dir)
+            .unwrap()
+            .contains("did not record a project directory"));
+        store_record(&directory, id, &project_dir);
+        // Only Kiro-shaped ids reach a command line, whatever the store says.
+        assert!(resume_refusal(&roots, "--resume-id", &project_dir)
+            .unwrap()
+            .contains("resume-capable"));
+        // And with no file store at all there is nothing to vouch for a row.
+        let nowhere = StoreRoots {
+            files: None,
+            workspaces: None,
+        };
+        assert!(resume_refusal(&nowhere, id, &project_dir)
+            .unwrap()
+            .contains("No native Kiro session store"));
+    }
+
+    #[test]
+    fn resume_stays_blocked_when_the_native_lock_is_open_or_unreadable() {
+        let store = tempfile::tempdir().unwrap();
+        let directory = store.path().join("sessions/cli");
+        fs::create_dir_all(&directory).unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let project_dir = project.path().to_str().unwrap().to_owned();
+        let id = "11111111-1111-4111-8111-111111111111";
+        let roots = StoreRoots {
+            files: Some(directory.clone()),
+            workspaces: None,
+        };
+        store_record(&directory, id, &project_dir);
+        let lock = directory.join(format!("{id}.lock"));
+        // A live foreign owner is never taken over.
+        fs::write(
+            &lock,
+            format!(r#"{{"pid":{},"started_at":"fixture"}}"#, std::process::id()),
+        )
+        .unwrap();
+        assert!(resume_refusal(&roots, id, &project_dir)
+            .unwrap()
+            .contains("already has this conversation open"));
+        // A lock that is not a regular file proves nothing, so it blocks too.
+        fs::remove_file(&lock).unwrap();
+        std::os::unix::fs::symlink(project.path(), &lock).unwrap();
+        let reason = resume_refusal(&roots, id, &project_dir).unwrap();
+        assert!(reason.contains("could not be read"), "{reason}");
+        // Nothing here wrote, renamed or removed anything in the store.
+        assert!(fs::symlink_metadata(&lock)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        fs::remove_file(&lock).unwrap();
+        // A stale lock stays Kiro's own business: the wrapper still resumes.
+        fs::write(&lock, r#"{"pid":4294967295,"started_at":"fixture"}"#).unwrap();
+        assert_eq!(resume_refusal(&roots, id, &project_dir), None);
     }
 
     #[test]

@@ -441,6 +441,135 @@ fn resume_is_refused_for_a_store_this_wrapper_cannot_verify() {
 }
 
 #[test]
+fn resume_is_refused_for_a_directory_kiro_did_not_record_for_that_conversation() {
+    // The board sends the directory it read from the store; a caller may not
+    // point the same conversation somewhere else, where a resumed session
+    // would run against a different project.
+    let harness = Harness::new();
+    fs::create_dir_all(harness.project()).unwrap();
+    let elsewhere = harness.dir.path().join("other-project");
+    fs::create_dir_all(&elsewhere).unwrap();
+    native_conversation(
+        &harness.sessions(),
+        NATIVE,
+        &harness.project(),
+        "recorded elsewhere",
+    );
+    let error = harness
+        .attempt(Action::Resume {
+            cwd: elsewhere.to_str().unwrap().into(),
+            native_id: NATIVE.into(),
+        })
+        .unwrap_err();
+    assert!(error.contains("is not that directory"), "{error}");
+    assert!(
+        error.contains(&harness.project().display().to_string()),
+        "{error}"
+    );
+    assert!(
+        harness.rows().is_empty(),
+        "a refused resume spawns no child"
+    );
+    // The same conversation does resume in the directory Kiro recorded.
+    let session = harness.resume(&harness.project(), NATIVE);
+    assert_eq!(session.native_id.as_deref(), Some(NATIVE));
+    harness.call(Action::Stop { id: session.id });
+}
+
+#[test]
+fn resume_is_refused_when_only_the_newer_store_mentions_the_conversation() {
+    // A per-workspace row carries the same UUID shape. Discovery lists it, the
+    // library blocks it, and the host must block it too: nothing unverified
+    // from another generation reaches a command line, however the id arrives.
+    let harness = Harness::new();
+    fs::create_dir_all(harness.project()).unwrap();
+    let workspace = harness.dir.path().join("kiro/sessions/874b7102139062fc");
+    fs::create_dir_all(workspace.join(format!("sess_{NATIVE}"))).unwrap();
+    fs::write(
+        workspace.join(format!("sess_{NATIVE}/session.json")),
+        format!(
+            r#"{{"schemaVersion":"1.0.0","dataModelVersion":1,"id":"sess_{NATIVE}","title":"Newer store","agentMode":"vibe","rootPaths":["{}"],"lastModifiedAt":"2026-10-27T10:59:37Z"}}"#,
+            harness.project().display()
+        ),
+    )
+    .unwrap();
+    let error = harness
+        .attempt(Action::Resume {
+            cwd: harness.project().to_str().unwrap().into(),
+            native_id: NATIVE.into(),
+        })
+        .unwrap_err();
+    assert!(error.contains("no readable record"), "{error}");
+    assert!(
+        harness.rows().is_empty(),
+        "a refused resume spawns no child"
+    );
+    // The wrapper still wrote nothing into either native store.
+    assert!(!harness.sessions().join(format!("{NATIVE}.json")).exists());
+    assert!(!harness.sessions().join(format!("{NATIVE}.lock")).exists());
+}
+
+#[test]
+fn an_unverifiable_record_or_an_unusual_lock_blocks_resume() {
+    let harness = Harness::new();
+    fs::create_dir_all(harness.project()).unwrap();
+    // A file named after a conversation whose own record states a different
+    // id is not that conversation, so nothing is resumed on it.
+    fs::write(
+        harness.sessions().join(format!("{NATIVE}.json")),
+        format!(
+            r#"{{"session_id":"{OTHER}","cwd":"{}"}}"#,
+            harness.project().display()
+        ),
+    )
+    .unwrap();
+    let error = harness
+        .attempt(Action::Resume {
+            cwd: harness.project().to_str().unwrap().into(),
+            native_id: NATIVE.into(),
+        })
+        .unwrap_err();
+    assert!(error.contains("unverified identity"), "{error}");
+    assert!(
+        harness.rows().is_empty(),
+        "a refused resume spawns no child"
+    );
+
+    native_conversation(
+        &harness.sessions(),
+        NATIVE,
+        &harness.project(),
+        "verified record",
+    );
+    // A lock that is not Kiro's regular lock file says nothing about whether a
+    // Kiro process holds the conversation: resuming could duplicate one.
+    let lock = harness.sessions().join(format!("{NATIVE}.lock"));
+    std::os::unix::fs::symlink(harness.project(), &lock).unwrap();
+    let error = harness
+        .attempt(Action::Resume {
+            cwd: harness.project().to_str().unwrap().into(),
+            native_id: NATIVE.into(),
+        })
+        .unwrap_err();
+    assert!(error.contains("could not be read"), "{error}");
+    assert!(harness.rows().is_empty(), "an unusual lock spawns no child");
+    // A lock path that is not a regular file (here a directory in the lock's
+    // place) also fails closed instead of reading as unlocked.
+    fs::remove_file(&lock).unwrap();
+    fs::create_dir(&lock).unwrap();
+    let error = harness
+        .attempt(Action::Resume {
+            cwd: harness.project().to_str().unwrap().into(),
+            native_id: NATIVE.into(),
+        })
+        .unwrap_err();
+    assert!(error.contains("could not be read"), "{error}");
+    // The wrapper never removes or replaces what it found in Kiro's store.
+    assert!(lock.is_dir(), "the wrapper never edits a native lock");
+    let _ = fs::remove_dir(&lock);
+}
+
+#[test]
 fn registry_and_socket_stay_metadata_only_and_private() {
     let harness = Harness::new();
     fs::create_dir_all(harness.project()).unwrap();

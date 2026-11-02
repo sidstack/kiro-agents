@@ -21,6 +21,19 @@ use super::{
 use serde_json::Value;
 use std::{fs, path::PathBuf, sync::atomic::AtomicBool};
 
+/// What one candidate turned out to be. Only `Unrecognised` may raise the
+/// scan's unrecognised count: a conversation the budgets ran out of room for
+/// is a truncated scan, never a record this wrapper failed to understand.
+enum Outcome {
+    /// A conversation was read.
+    Found(Conversation),
+    /// Shaped like a native record but its own content disagreed or was
+    /// unreadable, so nothing is guessed about it.
+    Unrecognised,
+    /// A valid conversation dropped because a budget was exhausted.
+    Budgeted,
+}
+
 /// Directory prefixes Kiro uses for its own session directories.
 const SESSION_PREFIXES: [&str; 2] = ["sess_", "cli_"];
 /// Value accepted for `schemaVersion` in the inspected store.
@@ -71,7 +84,7 @@ impl StoreAdapter for WorkspaceStore {
             directories.push(path);
         }
         directories.sort();
-        for workspace in directories {
+        'workspaces: for workspace in directories {
             let Ok(entries) = fs::read_dir(&workspace) else {
                 into.note(true);
                 continue;
@@ -115,8 +128,17 @@ impl StoreAdapter for WorkspaceStore {
                     continue;
                 }
                 match record(&session, budget, into) {
-                    Some(conversation) => into.conversations.push(conversation),
-                    None => into.unrecognised += 1,
+                    Outcome::Found(conversation) => into.conversations.push(conversation),
+                    Outcome::Unrecognised => into.unrecognised += 1,
+                    Outcome::Budgeted => {
+                        // The conversation budget is shared by the whole scan,
+                        // so no later candidate could fit either. Stop walking
+                        // the store and let truncation speak, rather than
+                        // charging the valid rows that did not fit to being
+                        // unrecognised.
+                        into.truncated = true;
+                        break 'workspaces;
+                    }
                 }
             }
         }
@@ -129,22 +151,32 @@ fn is_plain_directory(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-fn record(session: &std::path::Path, budget: &mut Budget, into: &mut Scan) -> Option<Conversation> {
-    let metadata = read_json_bounded(&session.join("session.json"), MAX_METADATA_BYTES)?;
+fn record(session: &std::path::Path, budget: &mut Budget, into: &mut Scan) -> Outcome {
+    let Some(metadata) = read_json_bounded(&session.join("session.json"), MAX_METADATA_BYTES)
+    else {
+        return Outcome::Unrecognised;
+    };
     if metadata.get("schemaVersion").and_then(Value::as_str) != Some(KNOWN_SCHEMA) {
         // An unknown schema gets no guessed metadata.
-        return None;
+        return Outcome::Unrecognised;
     }
     // The store states its own identity; the directory name has to agree with
     // it, so an unrelated directory is never read as a conversation.
-    let native_id = metadata.get("id").and_then(Value::as_str)?;
-    let directory_name = session.file_name()?.to_str()?;
+    let Some(native_id) = metadata.get("id").and_then(Value::as_str) else {
+        return Outcome::Unrecognised;
+    };
+    let Some(directory_name) = session.file_name().and_then(|name| name.to_str()) else {
+        return Outcome::Unrecognised;
+    };
     if !directory_name.starts_with(native_id) {
-        return None;
+        return Outcome::Unrecognised;
     }
-    let uuid = native_uuid(native_id)?;
+    let Some(uuid) = native_uuid(native_id) else {
+        return Outcome::Unrecognised;
+    };
     if !budget.take_conversation(into) {
-        return None;
+        // Recognised, valid and unaffordable: truncation, not a mystery row.
+        return Outcome::Budgeted;
     }
     let title = metadata
         .get("title")
@@ -181,7 +213,7 @@ fn record(session: &std::path::Path, budget: &mut Budget, into: &mut Scan) -> Op
                 .ok()
                 .map(|age| age.as_millis() as u64)
         });
-    Some(Conversation {
+    Outcome::Found(Conversation {
         // The row keeps the UUID so a conversation that also lives in the
         // file store merges into one result.
         native_id: uuid,
@@ -349,6 +381,46 @@ mod tests {
         let scan = scan(root.path());
         assert!(scan.conversations.is_empty(), "{:?}", scan.conversations);
         assert_eq!(scan.unrecognised, 3, "{scan:?}");
+    }
+
+    #[test]
+    fn an_exhausted_conversation_budget_truncates_rather_than_calling_valid_rows_unrecognised() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = "874b7102139062fc";
+        let session = |index: u32| format!("{index:08}-1111-4111-8111-111111111111");
+        // One genuinely unknown schema sorts first, so the count that stays
+        // honest is visible next to the count that must not inflate.
+        write_session(
+            root.path(),
+            workspace,
+            &format!("sess_{}", session(0)),
+            r#"{"schemaVersion":"2.0.0","id":"x"}"#,
+        );
+        for index in 1..=5 {
+            let uuid = session(index);
+            write_session(
+                root.path(),
+                workspace,
+                &format!("sess_{uuid}"),
+                &format!(
+                    r#"{{"schemaVersion":"1.0.0","id":"sess_{uuid}","title":"row","rootPaths":["/home/siddu/project"],"lastModifiedAt":"2026-10-27T10:59:37.689Z"}}"#
+                ),
+            );
+        }
+        let cancelled = AtomicBool::new(false);
+        let mut scan = Scan::default();
+        let mut budget = Budget {
+            entries: 20_000,
+            conversations: 2,
+            text_bytes: 6 * 1024 * 1024,
+            deadline: None,
+        };
+        WorkspaceStore::new(root.path().to_path_buf()).scan(&mut budget, &cancelled, &mut scan);
+        // Three valid conversations were dropped for want of budget. They are
+        // not unrecognised: the scan ran out of room and says so.
+        assert_eq!(scan.conversations.len(), 2, "{scan:?}");
+        assert_eq!(scan.unrecognised, 1, "{scan:?}");
+        assert!(scan.truncated, "{scan:?}");
     }
 
     #[test]

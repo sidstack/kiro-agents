@@ -164,9 +164,11 @@ impl Host {
     }
 
     /// Resume one native conversation the user chose explicitly. Kiro owns the
-    /// conversation, its profile and its locks: the wrapper only verifies that
-    /// nothing already supervises it, then hands the exact id to Kiro's own
-    /// resume flag in the conversation's recorded directory.
+    /// conversation, its profile and its locks: the host re-reads Kiro's own
+    /// file store to confirm the id, the recorded directory and the lock before
+    /// it hands the exact id to Kiro's resume flag, then verifies that nothing
+    /// already supervises the conversation. A row the board sent is a request,
+    /// not a verification.
     fn resume_session(
         &mut self,
         cwd: String,
@@ -176,22 +178,17 @@ impl Host {
             kiro::history::is_resumable_native_id(&native_id),
             "Kiro did not state a resume-capable session id for that row"
         );
+        // Provenance, recorded directory and lock are re-established from the
+        // native store here: a stale, hand-made or newer-store row never puts
+        // an id on a command line.
+        let roots = kiro::history::StoreRoots::from_env();
+        if let Some(reason) = kiro::history::resume_refusal(&roots, &native_id, &cwd) {
+            anyhow::bail!("{reason}");
+        }
         anyhow::ensure!(
             Path::new(&cwd).is_dir(),
             "Project directory {cwd} is no longer available; restore it or start a fresh session elsewhere"
         );
-        let roots = kiro::history::StoreRoots::from_env();
-        if let Some(directory) = &roots.files {
-            match kiro::history::lock_state(directory, &native_id) {
-                kiro::history::LockState::Open { pid } => anyhow::bail!(
-                    "Kiro already has this conversation open (pid {pid}); use it there or close it first"
-                ),
-                kiro::history::LockState::Unknown => anyhow::bail!(
-                    "Kiro's lock for that conversation could not be read; resuming could duplicate a live session"
-                ),
-                _ => (),
-            }
-        }
         let command = kiro::resume(&cwd, &native_id);
         self.start(cwd, None, Some(native_id), command)
     }
