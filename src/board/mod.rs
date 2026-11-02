@@ -151,74 +151,17 @@ impl App {
     }
 }
 
-/// Whether the running host is a build that can name requests it cannot
-/// handle — the same release that added `Resume` — an older build that
-/// cannot parse them at all, or the probe could not tell.
-#[derive(PartialEq, Eq)]
-enum HostSupport {
-    PredatesResume,
-    Current,
-    Unknown,
-}
-
-/// Side-channel diagnosis for a resume that closed without a reply: send a
-/// deliberately unnameable action on a fresh connection. A host from the
-/// Resume era always answers it (`Reply::Error`: not supported); a host that
-/// predates Resume drops the connection while deserializing. Never starts a
-/// host; a missing socket stays Unknown.
-fn probe_host_support(state: &Path) -> HostSupport {
-    let Ok(mut stream) = host::connect(state, false) else {
-        return HostSupport::Unknown;
-    };
-    if stream
-        .set_read_timeout(Some(Duration::from_secs(3)))
-        .is_err()
-    {
-        return HostSupport::Unknown;
-    }
-    use std::io::{BufReader, Write};
-    let frame = format!(
-        "{{\"version\":{},\"action\":{{\"HistorySupportProbe\":{{}}}}}}\n",
-        protocol::VERSION
-    );
-    if stream.write_all(frame.as_bytes()).is_err() {
-        return HostSupport::Unknown;
-    }
-    let mut reader = BufReader::new(&mut stream);
-    match protocol::receive::<Reply>(&mut reader) {
-        Ok(_) => HostSupport::Current,
-        Err(protocol::FrameError::Closed) => HostSupport::PredatesResume,
-        Err(_) => HostSupport::Unknown,
-    }
-}
-
-fn resume_close_message(support: HostSupport) -> String {
-    match support {
-        HostSupport::PredatesResume => "The running host predates history resume \
-                and cannot run it. Run `kiro-agents shutdown` (this stops its managed \
-                sessions), then reopen the dashboard from an updated build. Nothing \
-                was replayed."
-            .to_owned(),
-        // A current host can also close mid-request (crash, kill), possibly
-        // after starting the child, so the outcome stays explicitly unknown
-        // and shutdown is not offered as the remedy.
-        HostSupport::Current => "Resume outcome unknown — the current host closed \
-                the request before replying; the session may or may not have started. \
-                Check the session list before retrying."
-            .to_owned(),
-        HostSupport::Unknown => "Resume outcome unknown — the host closed the \
-                request before replying; the session may or may not have started. \
-                Check the session list before retrying."
-            .to_owned(),
-    }
-}
-
-fn resume_failure(error: &anyhow::Error, state: &Path) -> String {
+/// A closed connection does not establish whether the host accepted the
+/// request. It may have started the child before the reply was lost.
+fn resume_failure(error: &anyhow::Error, _state: &Path) -> String {
     if matches!(
         error.downcast_ref::<protocol::FrameError>(),
         Some(protocol::FrameError::Closed)
     ) {
-        return resume_close_message(probe_host_support(state));
+        return "Resume outcome unknown — the host closed the request before replying; \
+                the session may or may not have started. Check the session list \
+                before retrying. An older host may not support history resume."
+            .to_owned();
     }
     format!("Resume failed: {error:#}")
 }
@@ -1217,35 +1160,14 @@ mod tests {
     }
 
     #[test]
-    fn an_old_host_resume_failure_names_the_one_action_that_helps() {
-        let message = resume_close_message(HostSupport::PredatesResume);
-        assert!(message.contains("predates history resume"), "{message}");
-        assert!(message.contains("kiro-agents shutdown"), "{message}");
-        assert!(!message.contains("IPC connection closed"), "{message}");
-    }
-
-    #[test]
-    fn a_current_host_closing_mid_resume_leaves_the_outcome_unknown() {
-        for support in [HostSupport::Current, HostSupport::Unknown] {
-            let message = resume_close_message(support);
-            assert!(message.contains("outcome unknown"), "{message}");
-            assert!(message.contains("may or may not have started"), "{message}");
-            // Not proven old: never claim the host predates the feature or
-            // push the user into stopping live sessions.
-            assert!(!message.contains("predates"), "{message}");
-            assert!(!message.contains("shutdown"), "{message}");
-        }
-    }
-
-    #[test]
-    fn resume_failure_probes_an_absent_host_without_starting_one() {
+    fn a_closed_resume_connection_has_an_unknown_outcome() {
         let closed = anyhow::Error::from(protocol::FrameError::Closed);
-        let missing =
-            std::env::temp_dir().join(format!("kiro-agents-probe-absent-{}", std::process::id()));
-        let message = resume_failure(&closed, &missing);
+        let message = resume_failure(&closed, Path::new("/unused"));
         assert!(message.contains("outcome unknown"), "{message}");
+        assert!(message.contains("may or may not have started"), "{message}");
+        assert!(!message.contains("shutdown"), "{message}");
         assert_eq!(
-            resume_failure(&anyhow::anyhow!("boom"), &missing),
+            resume_failure(&anyhow::anyhow!("boom"), Path::new("/unused")),
             "Resume failed: boom"
         );
     }

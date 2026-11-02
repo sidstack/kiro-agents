@@ -1,21 +1,9 @@
 #!/usr/bin/env python3
-"""History resume against synthetic hosts that close the reply channel.
+"""A dropped resume reply leaves the outcome unknown for either host.
 
-Two distinct failures must produce two distinct messages:
-
-1. A pre-resume host cannot even parse the `Resume` request and closes the
-   connection without replying. A capability probe (an unnameable action the
-   newer host answers with `Reply::Error`) also closes, so the board can say
-   the running host predates the feature and name the one user action that
-   helps (`kiro-agents shutdown`).
-2. A current host answers the probe but still closes the resume request
-   before replying (crash, kill — possibly after starting the child). The
-   board must state the outcome is unknown and must not push the user into
-   stopping live sessions.
-
-In neither case does the board restart or replace the running host itself.
-
-Fake Kiro and synthetic stores only: no real Kiro state, no auth, no network.
+Synthetic peers emulate a pre-resume host and a current host that loses the
+reply. Neither outcome proves whether a session started, and the board must
+not recommend shutting down managed sessions. Fake stores and CLI only.
 """
 import json
 import os
@@ -142,11 +130,11 @@ def main():
         host = SyntheticHost(scratch / "state")
         run_scenario(
             scratch, host,
-            ["predates history resume", "kiro-agents shutdown"],
-            ["IPC connection closed"],
+            ["outcome unknown", "Check the session list"],
+            ["kiro-agents shutdown", "IPC connection closed"],
         )
         host.close()
-        print("PASS: older host resume failure is explained, not replayed, "
+        print("PASS: older host resume outcome is unknown, not replayed, "
               "and never restarts the host")
 
         scratch = Path(tmp) / "current"
@@ -154,12 +142,12 @@ def main():
         host = CurrentHost(scratch / "state")
         run_scenario(
             scratch, host,
-            ["outcome unknown", "not have started"],
+            ["outcome unknown", "Check the session list"],
             ["predates history resume", "kiro-agents shutdown",
              "IPC connection closed"],
         )
         host.close()
-        assert host.probe_seen, "the board must probe host capability"
+        assert not host.probe_seen, "the board must not infer host version from EOF"
         print("PASS: a current host closing mid-resume leaves the outcome "
               "unknown without blaming the host version")
 

@@ -155,12 +155,9 @@ stop behave as for a new session, and the resume id is recorded as metadata.
 **Older hosts.** `Resume` is the first action added to protocol v1, so a host that
 was already running before this build was installed cannot parse the request and
 closes the connection without replying (verified in `docs/FINDINGS.md`). The board
-then probes the host once with an action it cannot name: a current host always
-answers, an older one also closes. It states the diagnosis that matches — an older
-host is told to update (via `kiro-agents shutdown`, which stops its managed
-sessions), while a current host that closed mid-request is reported as an unknown
-outcome to check against the session list. The board never restarts or replaces a
-host by itself.
+then reports the outcome as unknown and asks the user to check the session list
+before retrying. An older host may lack resume support; the board never restarts or
+replaces a host by itself.
 
 **Refusals.** Enter reports a reason instead of acting when the conversation is held
 by a live Kiro lock, the lock cannot be read, the recorded project directory is gone,
