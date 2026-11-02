@@ -19,11 +19,7 @@ use super::{
     StoreAdapter, StoreKind, MAX_METADATA_BYTES,
 };
 use serde_json::Value;
-use std::{
-    fs,
-    path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::{fs, path::PathBuf, sync::atomic::AtomicBool};
 
 /// Directory prefixes Kiro uses for its own session directories.
 const SESSION_PREFIXES: [&str; 2] = ["sess_", "cli_"];
@@ -59,12 +55,13 @@ impl StoreAdapter for WorkspaceStore {
         };
         let mut directories: Vec<PathBuf> = Vec::new();
         for entry in workspaces.flatten() {
-            if cancelled.load(Ordering::Relaxed) {
+            if budget.stopped(cancelled) {
                 into.partial = true;
                 return;
             }
             if !budget.take_entry(into) {
-                return;
+                // Out of entry budget: process what was collected, don't drop it.
+                break;
             }
             let path = entry.path();
             // Hidden entries (`.index`) and symlinks are never walked.
@@ -79,26 +76,37 @@ impl StoreAdapter for WorkspaceStore {
                 into.note(true);
                 continue;
             };
-            let mut sessions: Vec<PathBuf> = entries
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| {
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| {
-                            SESSION_PREFIXES
-                                .iter()
-                                .any(|prefix| name.starts_with(prefix))
-                        })
-                })
-                .collect();
-            sessions.sort();
-            for session in sessions {
-                if cancelled.load(Ordering::Relaxed) {
+            // Session directories are bounded during enumeration too, so a
+            // workspace holding a huge directory listing cannot outrun the
+            // entry budget, the cancellation flag or the scan deadline.
+            let mut sessions: Vec<PathBuf> = Vec::new();
+            for entry in entries.flatten() {
+                if budget.stopped(cancelled) {
                     into.partial = true;
                     return;
                 }
+                let path = entry.path();
+                let shaped = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        SESSION_PREFIXES
+                            .iter()
+                            .any(|prefix| name.starts_with(prefix))
+                    });
+                if !shaped {
+                    continue;
+                }
                 if !budget.take_entry(into) {
+                    // Out of entry budget: process what was collected.
+                    break;
+                }
+                sessions.push(path);
+            }
+            sessions.sort();
+            for session in sessions {
+                if budget.stopped(cancelled) {
+                    into.partial = true;
                     return;
                 }
                 if !is_plain_directory(&session) {

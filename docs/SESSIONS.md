@@ -152,6 +152,13 @@ whose shape Kiro itself recognises (native UUID) is ever placed on a command lin
 The child is an ordinary supervised session, so attach, Ctrl+Q detach, rename and
 stop behave as for a new session, and the resume id is recorded as metadata.
 
+**Older hosts.** `Resume` is the first action added to protocol v1, so a host that
+was already running before this build was installed cannot parse the request and
+closes the connection without replying (verified in `docs/FINDINGS.md`). The board
+then states that the running host predates history resume and names the one user
+action — `kiro-agents shutdown`, which stops its managed sessions — instead of
+showing a transport error. The board never restarts or replaces a host by itself.
+
 **Refusals.** Enter reports a reason instead of acting when the conversation is held
 by a live Kiro lock, the lock cannot be read, the recorded project directory is gone,
 or the row exists only in the newer per-workspace store. A stale or dead lock is
@@ -160,8 +167,10 @@ file is never removed or rewritten. A conversation already supervised by one of 
 sessions resumes once and is then attachable, not duplicated. Nothing is replayed,
 re-run, migrated or written into Kiro's stores.
 
-**Budgets.** 2000 conversations, 2000 records, 128 KiB per metadata file, 32 KiB per
-transcript, 8 MiB of text overall, and a five-second scan deadline. The footer states
+**Budgets.** 2000 conversations, 20 000 directory entries, 128 KiB per metadata
+file, 32 KiB per transcript, 8 MiB of text overall, and a ten-second scan deadline
+enforced inside the adapters, not just between them, so closing the picker cannot
+join a runaway scan. The footer states
 which stores were searched, how many rows and texts were read, and any truncation,
 unrecognised or skipped-store counts, so a partial view is never mistaken for the
 whole history.

@@ -53,19 +53,30 @@ impl StoreAdapter for FileStore {
                 return;
             }
         };
-        // Sorted so a bounded scan is deterministic rather than directory order.
-        let mut paths: Vec<PathBuf> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
-            .collect();
-        paths.sort();
-        for path in paths {
-            if cancelled.load(Ordering::Relaxed) {
+        // Sorted so a bounded scan is deterministic rather than directory
+        // order. Enumeration itself stays inside the entry budget and honours
+        // cancellation and the deadline, so a huge directory cannot outrun
+        // either bound before parsing starts.
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for entry in entries.flatten() {
+            if budget.stopped(cancelled) {
                 into.partial = true;
                 return;
             }
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
             if !budget.take_entry(into) {
+                // Out of entry budget: process what was collected, don't drop it.
+                break;
+            }
+            paths.push(path);
+        }
+        paths.sort();
+        for path in paths {
+            if budget.stopped(cancelled) {
+                into.partial = true;
                 return;
             }
             if !fs::symlink_metadata(&path)
@@ -490,6 +501,7 @@ mod tests {
             entries: 3,
             conversations: 3,
             text_bytes: 100 * 1024,
+            deadline: None,
         };
         FileStore::new(directory.to_path_buf()).scan(&mut budget, &cancelled, &mut scan);
         assert_eq!(scan.conversations.len(), 3, "{scan:?}");
@@ -499,6 +511,33 @@ mod tests {
             "text budget exhaustion must be visible, not a silent full scan"
         );
         assert!(scan.conversations.iter().any(|row| !row.transcript));
+    }
+
+    #[test]
+    fn an_expired_deadline_stops_a_scan_in_progress() {
+        let store = tempfile::tempdir().unwrap();
+        let directory = store.path();
+        for index in 0..5 {
+            let id = format!("{:08}-0000-4000-8000-000000000000", index);
+            write(
+                directory,
+                &format!("{id}.json"),
+                &metadata(&id, "/tmp", Some("row")),
+            );
+        }
+        let cancelled = AtomicBool::new(false);
+        let mut scan = Scan::default();
+        let mut budget = Budget {
+            entries: 20_000,
+            conversations: 2_000,
+            text_bytes: 6 * 1024 * 1024,
+            deadline: Some(std::time::Instant::now() - std::time::Duration::from_secs(1)),
+        };
+        FileStore::new(directory.to_path_buf()).scan(&mut budget, &cancelled, &mut scan);
+        // The deadline stops the scan inside the adapter, not just between
+        // adapters, and the partial coverage is stated rather than hidden.
+        assert!(scan.conversations.is_empty(), "{scan:?}");
+        assert!(scan.partial);
     }
 
     #[test]

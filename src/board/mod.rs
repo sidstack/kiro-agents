@@ -9,7 +9,7 @@ use crate::{
     attach,
     features::{PanePlacement, WorkspaceFeature},
     host, kiro,
-    protocol::{Action, Reply, SessionInfo},
+    protocol::{self, Action, Reply, SessionInfo},
 };
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -149,6 +149,24 @@ impl App {
         self.mode = Mode::History;
         self.message.clear();
     }
+}
+
+/// Resume is the first action added to protocol v1, so a host that was
+/// already running when this build was installed cannot name it: the older
+/// build closes the connection instead of replying. Translate that dead-end
+/// error into the one action the user can actually take; the host is never
+/// restarted by us.
+fn resume_failure(error: &anyhow::Error) -> String {
+    if matches!(
+        error.downcast_ref::<protocol::FrameError>(),
+        Some(protocol::FrameError::Closed)
+    ) {
+        return "The running host predates history resume and refused the request. \
+                Run `kiro-agents shutdown` (this stops its managed sessions), \
+                then reopen the dashboard to resume conversations."
+            .to_owned();
+    }
+    format!("Resume failed: {error:#}")
 }
 
 impl App {
@@ -949,7 +967,7 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
                             }
                         }
                         Ok(_) => app.message = "Unexpected resume response".into(),
-                        Err(error) => app.message = format!("Resume failed: {error:#}"),
+                        Err(error) => app.message = resume_failure(&error),
                     }
                     refresh = Some(refresh_task(dir));
                     last_refresh = Instant::now();
@@ -991,7 +1009,7 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
                                 None
                             }
                             Err(error) => {
-                                app.message = format!("Resume failed: {error:#}");
+                                app.message = resume_failure(&error);
                                 None
                             }
                         }
@@ -1142,6 +1160,19 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn an_old_host_resume_failure_names_the_one_action_that_helps() {
+        let closed = anyhow::Error::from(protocol::FrameError::Closed);
+        let message = resume_failure(&closed);
+        assert!(message.contains("predates history resume"), "{message}");
+        assert!(message.contains("kiro-agents shutdown"), "{message}");
+        assert!(!message.contains("IPC connection closed"), "{message}");
+        assert_eq!(
+            resume_failure(&anyhow::anyhow!("boom")),
+            "Resume failed: boom"
+        );
     }
 
     #[test]

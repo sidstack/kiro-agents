@@ -406,3 +406,24 @@ copied into this repository or into logs).
   byte-identical afterwards. End-to-end resume of a real authenticated conversation,
   and Kiro's own errors for a missing profile or revoked auth, remain manual
   validation areas.
+
+## 2026-11-02 — Pre-resume hosts close Resume requests without replying
+
+Reproduced against the pre-resume host build (main `31b478c`, v0.7.0) in a private
+state directory, fake CLI only, no real Kiro state:
+
+- The running host answers `Status` normally (`{"Sessions":[]}`), so the whole
+  dashboard works, but a `{"version":1,"action":{"Resume":…}}` request is
+  deserialized against the older `Action` enum, fails, and `handle()` returns the
+  error without sending any `Reply`. The client sees EOF and reports
+  "IPC connection closed". Adding a request variant without bumping `VERSION` is
+  therefore invisible to an already-running host.
+- Reproduction: start the old binary as `__host` with `KIRO_AGENTS_HOME` pointed at
+  a temp directory, connect to `host.sock`, send the frame above followed by a
+  newline, and read: EOF with no reply, while the same frame against the current
+  host returns `Created`.
+- This build does not revive an old host: it cannot be patched in place. The board
+  translates the no-reply outcome into an explicit message naming
+  `kiro-agents shutdown` as the only user action, never restarts a host itself, and
+  a new host that cannot name a request now answers `Reply::Error` instead of
+  closing the connection (`tests/lifecycle.rs`, `tests/history_legacy.py`).

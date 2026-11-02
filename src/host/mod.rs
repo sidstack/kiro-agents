@@ -218,9 +218,9 @@ impl Host {
             .values_mut()
             .filter(|session| session.child.is_some())
         {
-            if session.info.name.is_some() {
-                continue;
-            }
+            // Native identity is enriched regardless of the session's label:
+            // a custom name must not hide which conversation the history
+            // picker could attach to instead of resuming.
             if session.info.native_id.is_none() {
                 if let Some(native_id) = self
                     .features
@@ -230,6 +230,10 @@ impl Host {
                     session.info.native_id = Some(native_id);
                     changed = true;
                 }
+            }
+            // Generated titles stay suppressed once the user named a session.
+            if session.info.name.is_some() {
+                continue;
             }
             for feature in &self.features {
                 if let Some(title) = feature.title(&session.info) {
@@ -411,14 +415,36 @@ fn handle(mut stream: UnixStream, shared: Shared) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
-    let request: Request = protocol::receive(&mut reader)?;
-    if request.version != VERSION {
+    // Parse version and action separately: a request this build cannot name
+    // still gets a real Reply instead of a closed connection, so a newer
+    // frontend sees an explanation rather than "IPC connection closed".
+    let value: serde_json::Value = protocol::receive(&mut reader)?;
+    let version = value
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|version| u8::try_from(version).ok());
+    if version != Some(VERSION) {
         protocol::send(
             &mut stream,
             &Reply::Error("Protocol mismatch; stop the old host explicitly".into()),
         )?;
         return Ok(());
     }
+    let request: Request = match serde_json::from_value(value) {
+        Ok(request) => request,
+        Err(error) => {
+            tracing::debug!(%error, "Unsupported request");
+            protocol::send(
+                &mut stream,
+                &Reply::Error(
+                    "That operation is not supported by the running host; stop it explicitly \
+                     and run the updated binary."
+                        .into(),
+                ),
+            )?;
+            return Ok(());
+        }
+    };
     let result: Result<Reply> = (|| match request.action {
         Action::Status => {
             let mut host = shared.lock().map_err(|_| anyhow!("Host lock poisoned"))?;

@@ -293,3 +293,29 @@ fn rename_is_metadata_only_persists_and_old_registries_remain_readable() {
     assert_eq!(legacy.display_name(), "project · Kiro default · #old");
     assert!(legacy.name.is_none() && legacy.title.is_none());
 }
+
+#[test]
+fn unknown_actions_get_an_explanatory_reply_not_a_closed_connection() {
+    let harness = Harness::new();
+    for (frame, expected) in [
+        (
+            b"{\"version\":1,\"action\":{\"SomeFutureAction\":{}}}\n".as_slice(),
+            "not supported by the running host",
+        ),
+        (b"{\"action\":\"Status\"}\n".as_slice(), "Protocol mismatch"),
+    ] {
+        let mut stream = host::connect(&harness.state(), false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(4)))
+            .unwrap();
+        use std::io::Write;
+        stream.write_all(frame).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        match protocol::receive::<Reply>(&mut reader).unwrap() {
+            Reply::Error(message) => assert!(message.contains(expected), "{message}"),
+            other => panic!("Expected an explanatory error, got {other:?}"),
+        }
+    }
+    // The host stays healthy and keeps serving known actions.
+    assert!(matches!(harness.call(Action::Status), Reply::Sessions(_)));
+}

@@ -33,11 +33,14 @@ pub struct HistoryPicker {
 }
 
 impl HistoryPicker {
-    /// Rank the loaded rows against the current query. `rows` are the live
-    /// wrapper sessions, used to recognise a conversation we already supervise.
+    /// Rank the loaded rows against the current query. `rows` are the wrapper
+    /// sessions; only live ones own a conversation. A stopped or failed row
+    /// keeps its native id as metadata, but must never capture Enter into an
+    /// attach of a dead session — the conversation resumes instead.
     pub fn refresh(&mut self, rows: &[SessionInfo]) -> bool {
         let owned: Vec<(String, String)> = rows
             .iter()
+            .filter(|row| row.state == "live")
             .filter_map(|row| {
                 row.native_id
                     .as_ref()
@@ -227,6 +230,13 @@ mod tests {
         }]
     }
 
+    fn stopped_rows(native: Option<&str>, id: &str) -> Vec<SessionInfo> {
+        let mut rows = rows(native, id);
+        rows[0].state = "stopped".into();
+        rows[0].pid = None;
+        rows
+    }
+
     fn picker() -> HistoryPicker {
         let records = vec![
             record(
@@ -296,6 +306,31 @@ mod tests {
         assert!(picker
             .notice()
             .contains("Already supervised as session wrap-1"));
+    }
+
+    #[test]
+    fn a_stopped_wrapper_row_never_captures_the_history_row() {
+        // A stopped or failed session keeps its native id as metadata, but it
+        // no longer owns the conversation: the history row must stay resumable
+        // instead of routing Enter to an attach of a dead session.
+        let mut picker = picker();
+        for record in &mut picker.records {
+            if record.native_id == "11111111-1111-4111-8111-111111111111" {
+                record.cwd = Some("/tmp".into());
+            }
+        }
+        picker.refresh(&stopped_rows(
+            Some("11111111-1111-4111-8111-111111111111"),
+            "wrap-1",
+        ));
+        let hit = picker
+            .hits
+            .iter()
+            .find(|hit| hit.native_id == "11111111-1111-4111-8111-111111111111")
+            .unwrap();
+        assert_eq!(hit.owned_by, None);
+        assert!(hit.decision.resumable());
+        assert!(!picker.notice().contains("Already supervised"));
     }
 
     #[test]

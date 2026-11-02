@@ -187,11 +187,14 @@ impl Scan {
 }
 
 /// Entry, conversation and text budgets shared by every adapter in one scan.
+/// The optional deadline lets an in-progress scan stop on time, not just
+/// between adapters, so closing the picker never joins an unbounded worker.
 #[derive(Debug)]
 pub(crate) struct Budget {
     entries: usize,
     conversations: usize,
     text_bytes: u64,
+    deadline: Option<Instant>,
 }
 
 impl Budget {
@@ -200,7 +203,16 @@ impl Budget {
             entries: MAX_ENTRIES,
             conversations: MAX_CONVERSATIONS,
             text_bytes: MAX_TEXT_TOTAL,
+            deadline: None,
         }
+    }
+
+    /// True when the scan must stop now: cancelled by the board or out of time.
+    pub(crate) fn stopped(&self, cancelled: &AtomicBool) -> bool {
+        cancelled.load(Ordering::Relaxed)
+            || self
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
     }
 
     fn take_entry(&mut self, scan: &mut Scan) -> bool {
@@ -304,6 +316,7 @@ fn scan_bounded(roots: &StoreRoots, cancelled: &AtomicBool, deadline: Option<Ins
     };
     let mut result = Scan::default();
     let mut budget = Budget::new();
+    budget.deadline = deadline;
     for adapter in roots.adapters() {
         if stopped() {
             result.partial = true;
@@ -683,6 +696,7 @@ mod tests {
             entries: 1,
             conversations: 1,
             text_bytes: 10,
+            deadline: None,
         };
         assert!(budget.take_entry(&mut scan));
         assert!(!budget.take_entry(&mut scan));

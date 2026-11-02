@@ -93,8 +93,10 @@ pub fn search(records: &[Conversation], query: &str, owned: &[(String, String)])
         hits.push(hit(record, score, owned));
     }
     hits.sort_by(|a, b| {
-        (b.score, b.updated_at_ms.unwrap_or(0), b.notice.is_some())
-            .cmp(&(a.score, a.updated_at_ms.unwrap_or(0), a.notice.is_some()))
+        // Better score, then newer, then the cleaner row: a stale-lock notice
+        // must not outrank an identical-scoring conversation without one.
+        (b.score, b.updated_at_ms.unwrap_or(0), b.notice.is_none())
+            .cmp(&(a.score, a.updated_at_ms.unwrap_or(0), a.notice.is_none()))
             .then_with(|| a.label.cmp(&b.label))
     });
     hits.truncate(MAX_RESULTS);
@@ -316,6 +318,21 @@ mod tests {
 
     fn ids(hits: &[Hit]) -> Vec<String> {
         hits.iter().map(|hit| hit.native_id.clone()).collect()
+    }
+
+    #[test]
+    fn a_stale_lock_notice_does_not_outrank_an_identical_clean_row() {
+        let mut corpus = corpus();
+        // Same score (empty query), same recency; only the lock differs.
+        for record in &mut corpus {
+            record.updated_at_ms = Some(30);
+        }
+        corpus.retain(|record| record.title.as_deref() != Some("Deploy notes"));
+        corpus[0].lock = LockState::Stale { pid: 42 };
+        let hits = search(&corpus, "", &[]);
+        assert_eq!(hits[0].native_id, "22222222-2222-4222-8222-222222222222");
+        assert!(hits[0].notice.is_none());
+        assert!(hits[1].notice.is_some());
     }
 
     #[test]
