@@ -1,4 +1,4 @@
-use super::history::{row_state, HistoryPicker};
+use super::history::{self, row_state, HistoryPicker};
 use super::{model::Board, picker::AgentStatus, Mode, PlacementFlow, PLACEMENTS};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -114,8 +114,9 @@ pub(super) fn draw(
                     format!("{}\nEnter attaches · Ctrl+Q returns here", row.cwd)
                 }
             } else {
-                format!("Cannot attach: session is {} (exit {}). Use Kiro history manually or Ctrl+N for a fresh session.\n{}",
-                    row.state, row.exit_code.map_or_else(|| "unknown".into(), |code| code.to_string()), row.notice.as_deref().unwrap_or(""))
+                format!("{} · {}\n{}", row.state,
+                    if row.native_id.is_some() { "Enter resumes this conversation" } else { "No verified conversation ID; use Ctrl+O to find it" },
+                    row.notice.as_deref().unwrap_or(""))
             },
         ),
     };
@@ -315,6 +316,10 @@ pub(super) fn draw(
                                 Style::default().add_modifier(Modifier::BOLD),
                             ),
                             Span::styled(state, Style::default().fg(color)),
+                            Span::raw(format!(
+                                " · updated {}",
+                                history::updated_date(hit.updated_at_ms)
+                            )),
                         ]),
                         Line::styled(
                             format!(

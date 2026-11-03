@@ -16,7 +16,7 @@ expression: "render(&board, &Mode::Browse, 100, 20, false)"
 │                                                                                                  │
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-Cannot attach: session is exited (exit 0). Use Kiro history manually or Ctrl+N for a fresh session.
+exited · No verified conversation ID; use Ctrl+O to find it
 
 
 ↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh

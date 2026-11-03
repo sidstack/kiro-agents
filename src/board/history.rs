@@ -8,6 +8,26 @@ use crate::kiro::history::{self, Conversation, Hit, StoreKind};
 use crate::protocol::SessionInfo;
 use std::time::Duration;
 
+/// UTC calendar date from Kiro's recorded modification timestamp.
+pub fn updated_date(timestamp: Option<u64>) -> String {
+    let Some(ms) = timestamp else {
+        return "unknown".into();
+    };
+    let days = (ms / 86_400_000).min(i32::MAX as u64) as i64;
+    // Gregorian civil date from days since the Unix epoch.
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02} UTC")
+}
+
 /// How long one store scan may run before it reports partial coverage.
 pub const SCAN_TIMEOUT: Duration = Duration::from_secs(10);
 /// What a scan actually covered, so the board never implies more than it read.
@@ -262,6 +282,12 @@ mod tests {
         };
         picker.refresh(&[]);
         picker
+    }
+
+    #[test]
+    fn displays_recorded_utc_date_and_unknown() {
+        assert_eq!(updated_date(Some(1_793_098_763_000)), "2026-10-27 UTC");
+        assert_eq!(updated_date(None), "unknown");
     }
 
     #[test]

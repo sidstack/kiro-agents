@@ -310,7 +310,23 @@ impl App {
                             }
                             return Some(Effect::Attach(row.id.clone()));
                         }
-                        self.message = format!("Cannot attach: session is {}. Create a fresh session or use Kiro history manually.", row.state);
+                        if row.generation != "v2" {
+                            self.message =
+                                "This session's generation is not supported for resume.".into();
+                        } else if let Some(native_id) = row.native_id.clone() {
+                            let cwd = row.cwd.clone();
+                            if self.popup {
+                                self.mode = Mode::Placement {
+                                    flow: PlacementFlow::Resume { cwd, native_id },
+                                    selected: default_placement_index(),
+                                };
+                                self.message.clear();
+                            } else {
+                                return Some(Effect::Resume { cwd, native_id });
+                            }
+                        } else {
+                            self.message = "This session has no verified Kiro conversation ID. Use Ctrl+O to find it in history.".into();
+                        }
                     }
                 }
                 _ => (),
@@ -1176,11 +1192,29 @@ mod tests {
     fn history_is_explained_without_attach_or_stop() {
         let mut app = app("exited");
         assert!(app.key(key(KeyCode::Enter)).is_none());
-        assert!(app.message.contains("Cannot attach"));
+        assert!(app.message.contains("Ctrl+O"));
         assert!(app
             .key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))
             .is_none());
         assert!(matches!(app.mode, Mode::Browse));
+    }
+
+    #[test]
+    fn historical_row_with_identity_resumes_and_popup_offers_placement() {
+        let mut app = app("exited");
+        app.board.rows[0].native_id = Some("11111111-1111-4111-8111-111111111111".into());
+        assert!(
+            matches!(app.key(key(KeyCode::Enter)), Some(Effect::Resume { native_id, .. }) if native_id == "11111111-1111-4111-8111-111111111111")
+        );
+        app.popup = true;
+        assert!(app.key(key(KeyCode::Enter)).is_none());
+        assert!(matches!(
+            app.mode,
+            Mode::Placement {
+                flow: PlacementFlow::Resume { .. },
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1344,7 +1378,7 @@ mod tests {
         );
         let mut app = popup_app("exited");
         assert!(app.key(key(KeyCode::Enter)).is_none());
-        assert!(app.message.contains("Cannot attach"));
+        assert!(app.message.contains("Ctrl+O"));
     }
 
     #[test]

@@ -162,12 +162,24 @@ def main():
             assert tree_digest(scratch / "kiro") == before, "native store changed"
             assert not (sessions / f"{native}.lock").exists(), "resume must not fake a lock"
             probe.wait_for("Kiro sessions", limit=10)
+            # The exited wrapper row in All must resume the same conversation.
+            probe.key(b"\t")
+            probe.key(b"/")
+            probe.type(resumed[0]["id"])
+            probe.key(b"\r")
+            probe.wait_for("Enter resumes this conversation")
+            probe.absorb()
+            probe.press(b"\r")
+            startup = probe.wait(b"READY:")
+            assert f"resume:{native}".encode() in startup, startup[-800:]
+            probe.raw(b"exit", settle=0.8)
+            probe.wait_for("Kiro sessions", limit=10)
 
             # Quitting the frontend leaves the resumed session supervised.
             probe.finish()
             probe = None
             listed = rows()
-            assert len([row for row in listed if row.get("native_id") == native]) == 1, listed
+            assert len([row for row in listed if row.get("native_id") == native]) == 2, listed
             print("PASS: read-only V1+V2 discovery, fuzzy/full-text/Unicode search, "
                   "live-lock and generation blocks, exact-id native resume, untouched stores")
         finally:

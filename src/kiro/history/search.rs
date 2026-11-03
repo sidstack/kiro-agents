@@ -10,7 +10,7 @@ use crate::fuzzy::{fuzzy_score, SUBSEQUENCE, SUBSTRING, WORD_START};
 use crate::kiro::history::resume::{self, Decision};
 
 /// Results kept for one query; the board renders only its viewport.
-pub const MAX_RESULTS: usize = 50;
+pub const MAX_RESULTS: usize = 2_000;
 /// Characters of context kept on each side of a text match.
 const SNIPPET_WINDOW: usize = 80;
 /// Longest sanitized snippet the board may render.
@@ -95,8 +95,18 @@ pub fn search(records: &[Conversation], query: &str, owned: &[(String, String)])
     hits.sort_by(|a, b| {
         // Better score, then newer, then the cleaner row: a stale-lock notice
         // must not outrank an identical-scoring conversation without one.
-        (b.score, b.updated_at_ms.unwrap_or(0), b.notice.is_none())
-            .cmp(&(a.score, a.updated_at_ms.unwrap_or(0), a.notice.is_none()))
+        (
+            (b.score + 1_000) / 5_000,
+            b.updated_at_ms.unwrap_or(0),
+            b.score,
+            b.notice.is_none(),
+        )
+            .cmp(&(
+                (a.score + 1_000) / 5_000,
+                a.updated_at_ms.unwrap_or(0),
+                a.score,
+                a.notice.is_none(),
+            ))
             .then_with(|| a.label.cmp(&b.label))
     });
     hits.truncate(MAX_RESULTS);
@@ -598,6 +608,39 @@ mod tests {
             .reason()
             .unwrap()
             .contains("already has this conversation open"));
+    }
+
+    #[test]
+    fn comparable_text_matches_prefer_recent_activity() {
+        let records = vec![
+            record(
+                "old",
+                "Old",
+                "/tmp",
+                None,
+                &[("prompt", "needle at the beginning")],
+                1,
+            ),
+            record(
+                "new",
+                "New",
+                "/tmp",
+                None,
+                &[("prompt", "some context before the needle")],
+                2,
+            ),
+        ];
+        assert_eq!(ids(&search(&records, "needle", &[])), ["new", "old"]);
+    }
+
+    #[test]
+    fn recent_list_is_not_cut_off_at_fifty() {
+        let rows: Vec<_> = (0..100)
+            .map(|n| record(&n.to_string(), "work", "/tmp", None, &[], n))
+            .collect();
+        let hits = search(&rows, "", &[]);
+        assert_eq!(hits.len(), 100);
+        assert_eq!(hits[0].native_id, "99");
     }
 
     #[test]

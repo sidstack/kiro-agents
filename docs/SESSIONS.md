@@ -144,13 +144,18 @@ are counted as unrecognised in the coverage line, never guessed.
 **Search.** One ranker is shared with the directory and agent pickers
 (`src/fuzzy.rs`). Terms must all match; each matches a substring or a fuzzy
 subsequence of the title, project, directory, agent, native id, or bounded prompt
-text. Snippets show the matching role and window.
+text. Snippets show the matching role and window. The empty search lists the newest
+recorded updates first; comparable matches prefer recent updates. Each row shows its
+recorded UTC update date, and all scanned results remain navigable.
 
 **Resume.** Only the `v1` file store is resumable by this wrapper: `kiro-cli chat
 --v2 --tui --resume-id <id>` runs in the recorded project directory. Only an id
 whose shape Kiro itself recognises (native UUID) is ever placed on a command line.
 The child is an ordinary supervised session, so attach, Ctrl+Q detach, rename and
-stop behave as for a new session, and the resume id is recorded as metadata.
+stop behave as for a new session, and the resume id is recorded as metadata. In the
+main board’s All view, Enter also resumes an exited V2 wrapper row when its verified
+native id is recorded; rows without that identity direct you to Ctrl+O. The host
+revalidates the conversation, directory and lock before launch.
 
 **Older hosts.** `Resume` is the first action added to protocol v1, so a host that
 was already running before this build was installed cannot parse the request and
