@@ -47,6 +47,14 @@ case "$url" in
      echo 'fixture: assets not ready' >&2
      exit 22
    fi
+   flaky=0
+   if [ -f "$INSTALL_FIXTURES/flaky-count" ]; then flaky=$(cat "$INSTALL_FIXTURES/flaky-count"); fi
+   if [ "$flaky" -lt "${INSTALL_FLAKY_COUNT:-0}" ]; then
+     echo $((flaky + 1)) > "$INSTALL_FIXTURES/flaky-count"
+     printf '502'
+     echo 'fixture: transient server error' >&2
+     exit 22
+   fi
    cp "$INSTALL_FIXTURES/${url##*/}" "$out";;
  *) cp "$INSTALL_FIXTURES/${url##*/}" "$out";;
 esac
@@ -125,6 +133,23 @@ esac
         self.assertIn('waiting up to three minutes', result.stderr)
         self.assertTrue((self.destination / 'kiro-agents').exists())
         self.assertEqual((self.root / 'pending-count').read_text().strip(), '2')
+
+    def test_transient_server_errors_are_retried_before_installation(self):
+        self.fixture()
+        self.env['INSTALL_FLAKY_COUNT'] = '2'
+        result = self.run_install()
+        self.assertTrue((self.destination / 'kiro-agents').exists())
+        self.assertEqual((self.root / 'flaky-count').read_text().strip(), '2')
+
+    def test_persistent_server_errors_do_not_replace_existing_binary(self):
+        self.fixture()
+        self.destination.mkdir()
+        binary = self.destination / 'kiro-agents'
+        binary.write_text('keep existing binary')
+        self.env['INSTALL_FLAKY_COUNT'] = '100'
+        self.run_install(success=False)
+        self.assertEqual(binary.read_text(), 'keep existing binary')
+        self.assertEqual((self.root / 'flaky-count').read_text().strip(), '19')
 
     def test_missing_assets_eventually_fail_without_replacing_existing_binary(self):
         self.fixture()

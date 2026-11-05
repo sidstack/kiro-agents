@@ -14,7 +14,9 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'x86_64-unknown-linux-gnu'
-VERSION_RE = r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?'
+# Build metadata (+...) is deliberately absent: install.sh refuses a tag that
+# carries it, so packaging one would publish a release nobody can install.
+VERSION_RE = r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?'
 FULL_SHA_RE = r'[0-9a-f]{40}'
 
 
