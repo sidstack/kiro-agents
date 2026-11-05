@@ -1,5 +1,6 @@
 use super::history::{self, row_state, HistoryPicker};
 use super::{model::Board, picker::AgentStatus, Mode, PlacementFlow, PLACEMENTS};
+use crate::host::MAX_SESSIONS;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -44,7 +45,7 @@ pub(super) fn draw(
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
-                "  {live}/8 live  ·  {} historical  ·  Search: {}",
+                "  {live}/{MAX_SESSIONS} live  ·  {} historical  ·  Search: {}",
                 board.rows.len() - live,
                 board.query
             )),

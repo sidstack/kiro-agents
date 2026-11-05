@@ -1,10 +1,11 @@
 //! Native names matched to an owned process tree, never directory recency.
 use crate::{
-    features::{clean_title, SessionFeature, SessionTitle},
+    features::{clean_title, Enrichment, SessionFeature, SessionTitle},
     protocol::SessionInfo,
 };
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
@@ -15,6 +16,7 @@ use std::{
 const MAX_FILES: usize = 10_000;
 const MAX_JSON: u64 = 64 * 1024;
 const MAX_RECORD: usize = 16 * 1024;
+const MAX_RECORDS: usize = 8;
 const MAX_ANCESTORS: usize = 12;
 
 pub struct NativeNames {
@@ -30,29 +32,27 @@ impl NativeNames {
         }
     }
 
-    /// The native conversation this owned process holds, as stated by its own
-    /// store metadata. Never inferred from recency, cwd alone or a PID alone.
-    fn native_identity(
-        &self,
-        session: &SessionInfo,
-        started: SystemTime,
-    ) -> Option<(String, PathBuf, Value)> {
-        let root_pid = session.pid?;
-        let mut matches = Vec::new();
+    /// One lock file that could belong to a live child.
+    fn candidates(&self, not_before: SystemTime) -> Option<Vec<LockCandidate>> {
         let mut entries = fs::read_dir(&self.directory).ok()?;
+        let mut candidates = Vec::new();
         for entry in entries.by_ref().take(MAX_FILES) {
             let Ok(entry) = entry else { continue };
             let path = entry.path();
             if path.extension().and_then(|x| x.to_str()) != Some("lock") {
                 continue;
             }
+            let Some(id) = path.file_stem().and_then(|x| x.to_str()) else {
+                continue;
+            };
+            let id = id.to_owned();
             let Ok(info) = fs::symlink_metadata(&path) else {
                 continue;
             };
             let Ok(modified) = info.modified() else {
                 continue;
             };
-            if !info.is_file() || modified < started {
+            if !info.is_file() || modified < not_before {
                 continue;
             }
             let Some(lock) = read_json(&path) else {
@@ -65,37 +65,96 @@ impl NativeNames {
             else {
                 continue;
             };
-            let Some(native_start) = owned_process_start(root_pid, pid, started) else {
-                continue;
-            };
-            if modified < native_start {
-                continue;
-            }
-            let Some(meta) = read_json(&path.with_extension("json")) else {
-                continue;
-            };
-            let Some(id) = path.file_stem().and_then(|x| x.to_str()) else {
-                continue;
-            };
-            if meta.get("session_id").and_then(Value::as_str) != Some(id)
-                || meta.get("cwd").and_then(Value::as_str) != Some(session.cwd.as_str())
-            {
-                continue;
-            }
-            matches.push((id.to_owned(), path, meta));
-            if matches.len() > 1 {
-                return None;
-            }
+            candidates.push(LockCandidate {
+                lock: path,
+                id,
+                pid,
+                modified,
+            });
         }
+        // Past the bound the directory is not trustworthy for any session.
         if entries.next().is_some() {
             return None;
         }
-        matches.pop()
+        Some(candidates)
     }
 
-    fn lookup(&self, session: &SessionInfo, started: SystemTime) -> Option<SessionTitle> {
-        let (native_id, lock, meta) = self.native_identity(session, started)?;
-        let _ = native_id;
+    /// Resolve a batch of live sessions from one directory pass. The result is
+    /// in the same order as `sessions`: the native conversation each owned
+    /// process holds plus that conversation's title, or nothing when the store
+    /// cannot state it for that session alone. Never inferred from recency,
+    /// cwd alone or a PID alone.
+    fn resolve(
+        &self,
+        sessions: &[(&SessionInfo, SystemTime)],
+    ) -> Vec<(Option<SessionTitle>, Option<String>)> {
+        let Some(oldest) = sessions.iter().map(|(_, started)| *started).min() else {
+            return Vec::new();
+        };
+        let Some(candidates) = self.candidates(oldest) else {
+            return sessions.iter().map(|_| (None, None)).collect();
+        };
+        // Clock and ancestry gates first: they cost no extra files, so only a
+        // candidate that could belong to some session gets its store metadata
+        // read, and each of those is read once for the whole batch.
+        let mut hits: Vec<(usize, usize)> = Vec::new();
+        for (position, (session, started)) in sessions.iter().enumerate() {
+            let Some(root_pid) = session.pid else {
+                continue;
+            };
+            for (index, candidate) in candidates.iter().enumerate() {
+                if candidate.modified < *started {
+                    continue;
+                }
+                let Some(native_start) = owned_process_start(root_pid, candidate.pid, *started)
+                else {
+                    continue;
+                };
+                if candidate.modified < native_start {
+                    continue;
+                }
+                hits.push((position, index));
+            }
+        }
+        let mut metas: HashMap<usize, Value> = HashMap::new();
+        for (_, index) in &hits {
+            if let Some(meta) = read_json(&candidates[*index].lock.with_extension("json")) {
+                metas.insert(*index, meta);
+            }
+        }
+        let mut resolved = Vec::with_capacity(sessions.len());
+        for (position, (session, _)) in sessions.iter().enumerate() {
+            let matching: Vec<usize> = hits
+                .iter()
+                .filter(|(owner, _)| *owner == position)
+                .map(|(_, index)| *index)
+                .filter(|index| {
+                    let Some(meta) = metas.get(index) else {
+                        return false;
+                    };
+                    let candidate = &candidates[*index];
+                    meta.get("session_id").and_then(Value::as_str) == Some(candidate.id.as_str())
+                        && meta.get("cwd").and_then(Value::as_str) == Some(session.cwd.as_str())
+                })
+                .collect();
+            // Two conversations claiming this project directory stay unresolved.
+            let [index] = matching.as_slice() else {
+                resolved.push((None, None));
+                continue;
+            };
+            let candidate = &candidates[*index];
+            let meta = &metas[index];
+            let native_id = crate::kiro::history::is_resumable_native_id(&candidate.id)
+                .then(|| candidate.id.clone());
+            // A named session never shows a generated label, so its transcript
+            // is not opened on the host's status path.
+            let title = (!session.name.is_some()).then(|| self.title_from(candidate, meta));
+            resolved.push((title.flatten(), native_id));
+        }
+        resolved
+    }
+
+    fn title_from(&self, candidate: &LockCandidate, meta: &Value) -> Option<SessionTitle> {
         if let Some(title) = meta
             .get("title")
             .and_then(Value::as_str)
@@ -107,7 +166,7 @@ impl NativeNames {
             });
         }
         if self.first_message {
-            let title = first_message_title(&lock.with_extension("jsonl"))?;
+            let title = first_message_title(&candidate.lock.with_extension("jsonl"))?;
             return Some(SessionTitle {
                 text: title,
                 source: "first_message",
@@ -115,6 +174,25 @@ impl NativeNames {
         }
         None
     }
+
+    fn resolve_one(
+        &self,
+        session: &SessionInfo,
+        started: SystemTime,
+    ) -> (Option<SessionTitle>, Option<String>) {
+        self.resolve(&[(session, started)])
+            .into_iter()
+            .next()
+            .unwrap_or((None, None))
+    }
+}
+
+#[derive(Debug)]
+struct LockCandidate {
+    lock: PathBuf,
+    id: String,
+    pid: u32,
+    modified: SystemTime,
 }
 
 impl SessionFeature for NativeNames {
@@ -122,23 +200,42 @@ impl SessionFeature for NativeNames {
         if session.state != "live" {
             return None;
         }
-        self.lookup(session, process_started(session.pid?)?)
+        self.resolve_one(session, process_started(session.pid?)?).0
     }
 
     fn native_id(&self, session: &SessionInfo) -> Option<String> {
         if session.state != "live" {
             return None;
         }
-        let (native_id, _, meta) = self.native_identity(session, process_started(session.pid?)?)?;
         // Only an id the store itself states is reported, and it must be a
         // shape the wrapper could one day resume.
-        if meta.get("session_id").and_then(Value::as_str) == Some(native_id.as_str())
-            && crate::kiro::history::is_resumable_native_id(&native_id)
-        {
-            Some(native_id)
-        } else {
-            None
+        self.resolve_one(session, process_started(session.pid?)?).1
+    }
+
+    fn enrich(&self, sessions: &[&SessionInfo]) -> Vec<Enrichment> {
+        let mut rows: Vec<(&SessionInfo, SystemTime)> = Vec::new();
+        let mut positions: Vec<usize> = Vec::new();
+        for (position, session) in sessions.iter().enumerate() {
+            if session.state != "live" {
+                continue;
+            }
+            let Some(pid) = session.pid else {
+                continue;
+            };
+            let Some(started) = process_started(pid) else {
+                continue;
+            };
+            rows.push((session, started));
+            positions.push(position);
         }
+        let resolved = self.resolve(&rows);
+        let mut enriched = (0..sessions.len())
+            .map(|_| Enrichment::default())
+            .collect::<Vec<_>>();
+        for (position, (title, native_id)) in positions.into_iter().zip(resolved) {
+            enriched[position] = Enrichment { title, native_id };
+        }
+        enriched
     }
 }
 
@@ -251,7 +348,12 @@ fn first_message_title(path: &Path) -> Option<String> {
         return None;
     }
     let mut reader = BufReader::new(File::open(path).ok()?);
-    for _ in 0..8 {
+    // Only whole records inside the size bound are parsed. An oversized record
+    // is skipped and the scan resynchronises on its terminating newline, so one
+    // long system or context record can neither abort the scan nor swallow the
+    // Prompt record after it. Each read is capped, so the total stay bounded.
+    let mut at_boundary = true;
+    for _ in 0..MAX_RECORDS {
         let mut line = Vec::new();
         reader
             .by_ref()
@@ -261,18 +363,31 @@ fn first_message_title(path: &Path) -> Option<String> {
         if line.is_empty() {
             break;
         }
-        if line.len() > MAX_RECORD {
-            return None;
+        let ended_on_newline = line.last() == Some(&b'\n');
+        let usable = at_boundary && ended_on_newline && line.len() <= MAX_RECORD;
+        at_boundary = ended_on_newline;
+        if !usable {
+            continue;
         }
         let Ok(record) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
-        // Tagged native records only: never derive a name from assistant/tool output.
-        let kind = record.get("kind").and_then(Value::as_str)?;
+        // Tagged native records only: never derive a name from assistant/tool
+        // output. An untagged or oddly shaped native record is skipped so a
+        // schema header or newer record shape cannot hide a later Prompt.
+        let Some(kind) = record.get("kind").and_then(Value::as_str) else {
+            continue;
+        };
         if !matches!(kind, "Prompt") {
             continue;
         }
-        let content = record.get("data")?.get("content")?.as_array()?;
+        let Some(content) = record
+            .get("data")
+            .and_then(|data| data.get("content"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
         let text = content
             .iter()
             .filter_map(|part| {
@@ -432,7 +547,8 @@ mod tests {
         let feature = NativeNames::new(root.path().into(), true);
         fixture(root.path(), "one", &row, "one");
         assert!(feature
-            .lookup(&row, SystemTime::now() + Duration::from_secs(1))
+            .resolve_one(&row, SystemTime::now() + Duration::from_secs(1))
+            .0
             .is_none());
         fixture(root.path(), "two", &row, "two");
         assert!(feature.title(&row).is_none());
@@ -474,6 +590,99 @@ mod tests {
         assert!(NativeNames::new(root.path().into(), true)
             .title(&row)
             .is_none());
+    }
+
+    #[test]
+    fn oddly_shaped_and_oversized_records_are_skipped_not_fatal() {
+        let root = tempfile::tempdir().unwrap();
+        let row = session(root.path());
+        fixture(root.path(), "native", &row, "");
+        let transcript = root.path().join("native.jsonl");
+        let prompt = |text: &str| {
+            format!(
+                "{{\"kind\":\"Prompt\",\"data\":{{\"content\":[{{\"kind\":\"text\",\"data\":\"{text}\"}}]}}}}\n"
+            )
+        };
+
+        // Untagged and unexpectedly shaped native records must not end the scan.
+        fs::write(
+            &transcript,
+            concat!(
+                "{\"schemaVersion\":1}\n",
+                "{\"kind\":null,\"data\":\"not a tag\"}\n",
+                "{\"kind\":\"Prompt\",\"data\":\"unexpected shape\"}\n",
+            ),
+        )
+        .unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .and_then(|mut file| {
+                use std::io::Write;
+                file.write_all(prompt("Fix title derivation for odd records").as_bytes())
+            })
+            .unwrap();
+        let title = NativeNames::new(root.path().into(), true)
+            .title(&row)
+            .unwrap();
+        assert_eq!(title.text, "Fix title derivation for odd records");
+        assert_eq!(title.source, "first_message");
+
+        // A leading record past the read bound is skipped, and the scan
+        // resynchronises so the next whole record is still readable.
+        let oversized = format!("{{\"blob\":\"{}\"}}\n", "x".repeat(MAX_RECORD + 4096));
+        fs::write(
+            &transcript,
+            format!("{oversized}{}", prompt("Found after a huge record")),
+        )
+        .unwrap();
+        let title = NativeNames::new(root.path().into(), true)
+            .title(&row)
+            .unwrap();
+        assert_eq!(title.text, "Found after a huge record");
+
+        // Reading stays bounded: eight capped reads, whatever the file holds.
+        let beyond = format!(
+            "{}{}",
+            "x".repeat((MAX_RECORD + 1) * 20),
+            prompt("Never reached")
+        );
+        fs::write(&transcript, beyond).unwrap();
+        assert!(NativeNames::new(root.path().into(), true)
+            .title(&row)
+            .is_none());
+    }
+
+    #[test]
+    fn one_status_batch_finds_every_owned_conversation_with_one_scan() {
+        let root = tempfile::tempdir().unwrap();
+        let first = session(root.path());
+        let mut second = first.clone();
+        second.id = "second".into();
+        second.cwd = format!("{}/second", root.path().to_string_lossy());
+        second.name = Some("named by hand".into());
+        let one = "11111111-4222-4333-4444-444444444444";
+        let two = "22222222-4222-4333-4444-444444444444";
+        let feature = NativeNames::new(root.path().into(), true);
+        fixture(root.path(), one, &first, "Fix auth state");
+        fs::create_dir_all(root.path().join("second")).unwrap();
+        fixture(root.path(), two, &second, "Reconcile cost");
+        let enriched = feature.enrich(&[&first, &second]);
+        assert_eq!(enriched.len(), 2);
+        let first_title = enriched[0].title.as_ref().unwrap();
+        assert_eq!(first_title.text, "Fix auth state");
+        assert_eq!(first_title.source, "kiro");
+        assert_eq!(enriched[0].native_id.as_deref(), Some(one));
+        // A session the user named keeps its own label, so its transcript is
+        // never opened on this path; its conversation is still identified.
+        assert!(enriched[1].title.is_none());
+        assert_eq!(enriched[1].native_id.as_deref(), Some(two));
+        // A dead process yields neither half, and the batch stays aligned.
+        let mut dead = first.clone();
+        dead.state = "failed".into();
+        let enriched = feature.enrich(&[&dead, &second]);
+        assert!(enriched[0].title.is_none() && enriched[0].native_id.is_none());
+        assert_eq!(enriched[1].native_id.as_deref(), Some(two));
     }
 
     #[test]

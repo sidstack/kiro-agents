@@ -59,8 +59,9 @@ fetch() {
     curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
         --retry 3 --connect-timeout 10 --max-time 120 "$@"
 }
-# GitHub can publish a release record before CI attaches its assets. Retry only
-# missing assets; other download failures keep the existing executable intact.
+# GitHub can publish a release record before CI attaches its assets, and an
+# attached asset can still answer 5xx once. Retry both up to the same bound;
+# any other download failure keeps the existing executable intact.
 fetch_release_asset() {
     asset_url=$1
     asset_file=$2
@@ -69,11 +70,18 @@ fetch_release_asset() {
         if download_status=$(fetch --output "$asset_file" --write-out '%{http_code}' "$asset_url" 2> "$workspace/download-error"); then
             return 0
         fi
-        if [ "$download_status" != 404 ] || [ "$asset_attempt" -ge 18 ]; then
+        case "$download_status" in
+            404 | 5*) ;;
+            *)
+                cat "$workspace/download-error" >&2
+                return 1
+                ;;
+        esac
+        if [ "$asset_attempt" -ge 18 ]; then
             cat "$workspace/download-error" >&2
             return 1
         fi
-        if [ "$asset_attempt" -eq 0 ]; then
+        if [ "$asset_attempt" -eq 0 ] && [ "$download_status" = 404 ]; then
             printf 'Release assets are not attached yet; waiting up to three minutes for this asset...\n' >&2
         fi
         asset_attempt=$((asset_attempt + 1))

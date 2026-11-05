@@ -26,7 +26,7 @@ use std::{
 };
 
 const RING_BYTES: usize = 2 * 1024 * 1024;
-const MAX_SESSIONS: usize = 8;
+pub(crate) const MAX_SESSIONS: usize = 8;
 type Shared = Arc<Mutex<Host>>;
 
 struct Session {
@@ -79,6 +79,14 @@ impl Host {
     ) -> Result<(SessionInfo, Box<dyn Read + Send>)> {
         let cwd = fs::canonicalize(cwd)?;
         anyhow::ensure!(cwd.is_dir(), "Project path is not a directory");
+        // Typed names arrive straight from the picker's manual fallback, so the
+        // host is the only place that can stop them from steering kiro-cli.
+        if let Some(agent) = agent.as_deref() {
+            anyhow::ensure!(
+                kiro::usable_typed_name(agent),
+                "Agent name must be non-empty, at most 256 bytes, not start with '-' and hold no control characters"
+            );
+        }
         let cwd = cwd
             .to_str()
             .context("Project path must be UTF-8")?
@@ -210,38 +218,61 @@ impl Host {
 
     fn refresh_titles(&mut self) -> Result<()> {
         let mut changed = false;
-        for session in self
+        // One Status pass asks each feature about every live session at once:
+        // Kiro's session directory is then scanned once per refresh, not once
+        // per live session per question.
+        let live: Vec<String> = self
             .sessions
-            .values_mut()
-            .filter(|session| session.child.is_some())
-        {
-            // Native identity is enriched regardless of the session's label:
-            // a custom name must not hide which conversation the history
-            // picker could attach to instead of resuming.
-            if session.info.native_id.is_none() {
-                if let Some(native_id) = self
-                    .features
-                    .iter()
-                    .find_map(|feature| feature.native_id(&session.info))
-                {
-                    session.info.native_id = Some(native_id);
-                    changed = true;
+            .iter()
+            .filter(|(_, session)| session.child.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut titled = vec![false; live.len()];
+        for feature in &self.features {
+            let mut rows = Vec::new();
+            let mut asking = Vec::new();
+            for (position, id) in live.iter().enumerate() {
+                let Some(session) = self.sessions.get(id) else {
+                    continue;
+                };
+                // Native identity is enriched regardless of the session's
+                // label: a custom name must not hide which conversation the
+                // history picker could attach to instead of resuming.
+                let needs_id = session.info.native_id.is_none();
+                // Generated titles stay suppressed once the user named a session.
+                let needs_title = session.info.name.is_none() && !titled[position];
+                if !needs_id && !needs_title {
+                    continue;
                 }
+                rows.push(&session.info);
+                asking.push((position, needs_id, needs_title));
             }
-            // Generated titles stay suppressed once the user named a session.
-            if session.info.name.is_some() {
-                continue;
+            if rows.is_empty() {
+                break;
             }
-            for feature in &self.features {
-                if let Some(title) = feature.title(&session.info) {
-                    if session.info.title.as_deref() != Some(&title.text)
-                        || session.info.title_source.as_deref() != Some(title.source)
-                    {
-                        session.info.title = Some(title.text);
-                        session.info.title_source = Some(title.source.to_owned());
+            for ((position, needs_id, needs_title), enrichment) in
+                asking.into_iter().zip(feature.enrich(&rows))
+            {
+                let Some(session) = self.sessions.get_mut(&live[position]) else {
+                    continue;
+                };
+                if needs_id {
+                    if let Some(native_id) = enrichment.native_id {
+                        session.info.native_id = Some(native_id);
                         changed = true;
                     }
-                    break;
+                }
+                if needs_title {
+                    if let Some(title) = enrichment.title {
+                        titled[position] = true;
+                        if session.info.title.as_deref() != Some(&title.text)
+                            || session.info.title_source.as_deref() != Some(title.source)
+                        {
+                            session.info.title = Some(title.text);
+                            session.info.title_source = Some(title.source.to_owned());
+                            changed = true;
+                        }
+                    }
                 }
             }
         }
@@ -313,10 +344,29 @@ pub fn connect(dir: &Path, start: bool) -> Result<UnixStream> {
                     "Host startup failed ({status}); run kiro-agents __host to see the error"
                 );
             }
+            // A launcher that exits successfully lost the lock to another host.
+            // Give that host a short grace period to start listening instead of
+            // waiting out the whole startup deadline, then say what happened.
+            let grace = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < grace {
+                if let Ok(stream) = UnixStream::connect(&path) {
+                    return Ok(stream);
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            anyhow::bail!(
+                "another kiro-agents host owns the lock in {dir:?}, but its socket is not answering; run 'kiro-agents __host' in the foreground to diagnose"
+            );
         }
         thread::sleep(Duration::from_millis(25));
     }
-    Err(anyhow!("Host startup timed out"))
+    // The launcher is still running, so it holds the lock but has not served
+    // its socket. Naming the process beats a bare timeout: the user has to
+    // kill that host to recover.
+    Err(anyhow!(
+        "kiro-agents host (pid {}) is running but not answering its socket in {dir:?}; kill that process to recover",
+        launcher.id()
+    ))
 }
 
 pub fn call(dir: &Path, action: Action, start: bool) -> Result<Reply> {

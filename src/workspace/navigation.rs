@@ -76,8 +76,10 @@ impl PaneRow {
 }
 
 /// Pick the next or previous pane in a deterministically ordered cycle. The
-/// origin does not have to be a session pane: a shell or empty launcher steps
-/// into the near end of the list. None means the layout stays untouched.
+/// caller only steps from a pane that already belongs to the cycle, so the
+/// missing-origin arms below are a defensive fallback that chooses the near end
+/// of the list. None means the layout stays untouched: an empty cycle, or an
+/// origin that is already the cycle's only entry.
 fn step_target(panes: &[PaneRow], origin: &str, step: PaneStep) -> Option<usize> {
     if panes.is_empty() {
         return None;

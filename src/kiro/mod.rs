@@ -24,6 +24,23 @@ pub fn executable() -> std::ffi::OsString {
     env::var_os("KIRO_AGENTS_KIRO_BIN").unwrap_or_else(|| "kiro-cli".into())
 }
 
+/// Reject a typed agent name that Kiro would read as its own option or that
+/// cannot name a profile at all. Nested `dir/name` profiles stay allowed: Kiro
+/// lists and accepts them. This is argument hygiene, not a shell guard — the
+/// name is always passed as one argv entry.
+pub fn usable_typed_name(agent: &str) -> bool {
+    !agent.is_empty()
+        && agent.len() <= MAX_TYPED_NAME_BYTES
+        && !agent.starts_with('-')
+        && agent.chars().all(|ch| !ch.is_control() && ch != '\u{7f}')
+}
+
+/// A typed name longer than this is not a profile name; it is a paste or a
+/// probe, and Kiro would only echo an unreadable error.
+pub const MAX_TYPED_NAME_BYTES: usize = 256;
+
+/// Build the Kiro argv for a fresh session. The agent name must already pass
+/// [`usable_typed_name`]; discovered names pass the equivalent scoped check.
 pub fn launch(cwd: &str, agent: Option<&str>) -> CommandBuilder {
     let mut command = CommandBuilder::new(executable());
     command.args(["chat", "--v2", "--tui"]);
@@ -690,6 +707,25 @@ pub fn doctor() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn typed_agent_names_cannot_become_kiro_options() {
+        assert!(usable_typed_name("reviewer"));
+        assert!(usable_typed_name("team/reviewer"));
+        assert!(usable_typed_name("ünïcödé-review"));
+        for rejected in [
+            "",
+            "-",
+            "-x",
+            "--trust-all-tools",
+            "two\nlines",
+            "tab\there",
+            "\u{7f}",
+        ] {
+            assert!(!usable_typed_name(rejected), "{rejected:?} must be refused");
+        }
+        assert!(!usable_typed_name(&"a".repeat(MAX_TYPED_NAME_BYTES + 1)));
+    }
+
     use super::*;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
