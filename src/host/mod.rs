@@ -79,6 +79,14 @@ impl Host {
     ) -> Result<(SessionInfo, Box<dyn Read + Send>)> {
         let cwd = fs::canonicalize(cwd)?;
         anyhow::ensure!(cwd.is_dir(), "Project path is not a directory");
+        // Typed names arrive straight from the picker's manual fallback, so the
+        // host is the only place that can stop them from steering kiro-cli.
+        if let Some(agent) = agent.as_deref() {
+            anyhow::ensure!(
+                kiro::usable_typed_name(agent),
+                "Agent name must be non-empty, at most 256 bytes, not start with '-' and hold no control characters"
+            );
+        }
         let cwd = cwd
             .to_str()
             .context("Project path must be UTF-8")?

@@ -336,3 +336,30 @@ fn a_live_host_with_a_missing_socket_names_the_owner_instead_of_timing_out() {
     );
     assert!(error.contains(&state.to_string_lossy().into_owned()));
 }
+
+#[test]
+fn typed_agent_names_are_checked_before_kiro_sees_them() {
+    let harness = Harness::new();
+    let cwd = harness.dir.path().to_str().unwrap().to_owned();
+    for rejected in ["-x", "--trust-all-tools", "two\nlines", "tab\there", ""] {
+        assert!(
+            host::call(
+                &harness.state(),
+                Action::New {
+                    cwd: cwd.clone(),
+                    agent: Some(rejected.into()),
+                },
+                false
+            )
+            .is_err(),
+            "{rejected:?} must not reach kiro-cli"
+        );
+    }
+    assert!(harness.rows().is_empty(), "a rejected name must not spawn");
+
+    // Kiro lists nested profile names itself, so they stay a valid choice.
+    let session = harness.new_session(Some("team/reviewer"));
+    let (_, mut reader) = harness.attach(&session.id);
+    let startup = output_until(&mut reader, b"READY:");
+    assert!(String::from_utf8_lossy(&startup).contains("team/reviewer"));
+}
