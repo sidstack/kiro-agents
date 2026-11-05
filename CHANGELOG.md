@@ -5,6 +5,13 @@ Conventional Commits by release-please.
 
 ## Local MVP history (before automated releases)
 
+## [0.8.0](https://github.com/sidstack/kiro-agents/compare/v0.7.0...v0.8.0) (2026-11-05)
+
+
+### Features
+
+* add read-only history quick-open and native resume ([#33](https://github.com/sidstack/kiro-agents/issues/33)) ([2bb6c11](https://github.com/sidstack/kiro-agents/commit/2bb6c117a20f61f42ec069a2d7d75437833c45f9))
+
 ## [0.7.0](https://github.com/sidstack/kiro-agents/compare/v0.6.0...v0.7.0) (2026-10-30)
 
 
