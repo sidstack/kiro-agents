@@ -1,5 +1,5 @@
 use super::directories::DirectoryScan;
-use crate::fuzzy::fuzzy_score;
+use crate::fuzzy::{fuzzy_score, QueryScorer, ScoreScratch};
 use crate::kiro;
 use std::collections::HashSet;
 use std::{
@@ -50,6 +50,35 @@ pub struct Candidate {
     pub origin: Origin,
 }
 
+/// An indexed directory with the two forms a fuzzy query is scored against,
+/// already case-folded. The relative form matches what the picker scores
+/// today: the path with `$HOME` stripped, or the path itself outside home.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct IndexedRow {
+    path: String,
+    name: String,
+    relative: String,
+}
+
+pub(super) fn index_rows(paths: Vec<String>) -> Vec<IndexedRow> {
+    let home = env::var_os("HOME").map(PathBuf::from);
+    paths
+        .into_iter()
+        .map(|path| {
+            let relative = home
+                .as_ref()
+                .and_then(|home| Path::new(&path).strip_prefix(home).ok())
+                .map(|rest| rest.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone());
+            IndexedRow {
+                name: file_name(&path).to_lowercase(),
+                relative: relative.to_lowercase(),
+                path,
+            }
+        })
+        .collect()
+}
+
 /// Keyboard-first directory choice: current directory, recent session
 /// directories, bounded filesystem browsing, and a typed path fallback.
 #[derive(Debug, Clone)]
@@ -62,7 +91,9 @@ pub struct DirPicker {
     pub notice: Option<String>,
     pub(super) recents: Vec<String>,
     pub(super) discovery: Option<DirectoryScan>,
-    pub(super) indexed: Vec<String>,
+    // The lowercase name and home-relative form are folded once, when the
+    // scan replies, because every keystroke re-scores the whole index.
+    pub(super) indexed: Vec<IndexedRow>,
     pub(super) scanning: bool,
     pub(super) scan_limited: bool,
 }
@@ -222,22 +253,16 @@ impl DirPicker {
             // Match the entire home-relative path, including nested fragments.
             // Leading /, ~ and . preserve explicit filesystem browsing semantics.
             if !query.starts_with(['/', '~', '.']) {
-                let home = env::var_os("HOME").map(PathBuf::from);
-                for path in &self.indexed {
-                    let relative = home
-                        .as_ref()
-                        .and_then(|home| {
-                            Path::new(path)
-                                .strip_prefix(home)
-                                .ok()
-                                .map(|p| p.to_string_lossy().into_owned())
-                        })
-                        .unwrap_or_else(|| path.clone());
-                    if let Some(score) = max_score(
-                        fuzzy_score(&lower, &file_name(path)),
-                        fuzzy_score(&lower, &relative),
-                    ) {
-                        ranked.push((score, Origin::Recursive, path.clone()));
+                let scorer = QueryScorer::new(&lower);
+                // One pair of scratch buffers serves the whole pass: bands,
+                // bonuses and ordering are unchanged, only the per-row
+                // allocations move off the keystroke path.
+                let mut scratch = ScoreScratch::default();
+                for row in &self.indexed {
+                    let by_name = scorer.score_lowercase(&row.name, &mut scratch);
+                    let by_path = scorer.score_lowercase(&row.relative, &mut scratch);
+                    if let Some(score) = max_score(by_name, by_path) {
+                        ranked.push((score, Origin::Recursive, row.path.clone()));
                     }
                 }
             }
@@ -260,7 +285,7 @@ impl DirPicker {
         }
 
         if query.is_empty() {
-            for path in &self.indexed {
+            for path in self.indexed.iter().map(|row| &row.path) {
                 if seen.insert(path.clone()) {
                     rows.push(Candidate {
                         path: path.clone(),
@@ -269,11 +294,9 @@ impl DirPicker {
                 }
             }
         }
-        self.truncated = if self.discovery.is_some() {
-            self.scan_limited
-        } else {
-            truncated
-        };
+        // Either limit can hide rows: the current listing's cap, or the
+        // recursive index's. Report both rather than whichever replied last.
+        self.truncated = truncated || self.scan_limited;
         self.candidates = rows;
         self.selected = match anchor {
             Some(path) => self
@@ -301,7 +324,7 @@ impl DirPicker {
         let Some(listing) = self.discovery.as_ref().and_then(DirectoryScan::poll) else {
             return false;
         };
-        self.indexed = listing.paths;
+        self.indexed = index_rows(listing.paths);
         self.scanning = listing.scanning;
         self.scan_limited = listing.limited;
         // An unedited list preserves manual navigation; a typed query chooses
@@ -924,13 +947,81 @@ mod tests {
     }
 
     #[test]
+    fn indexed_rows_keep_accented_and_mixed_case_forms_reachable() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().to_string_lossy().into_owned();
+        let accented = format!("{base}/Café-Shop");
+        let mixed = format!("{base}/HelloWorld");
+        let mut picker = DirPicker::open(base, Vec::new());
+        picker.indexed = index_rows(vec![accented.clone(), mixed.clone()]);
+        for ch in "helloworld".chars() {
+            picker.press(ch);
+        }
+        assert_eq!(picker.candidates[0].path, mixed);
+        picker.clear_query();
+        for ch in "caf".chars() {
+            picker.press(ch);
+        }
+        assert!(
+            picker.candidates.iter().any(|row| row.path == accented),
+            "the accented row stays reachable: {:?}",
+            picker.candidates
+        );
+    }
+
+    #[test]
+    fn either_listing_limit_shows_the_truncation_notice() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().to_string_lossy().into_owned();
+        let mut picker = DirPicker::open(base, Vec::new());
+        picker.scan_limited = true;
+        picker.rebuild();
+        assert!(picker.truncated);
+    }
+
+    /// Manual probe for the indexed picker's per-keystroke cost. Run with
+    /// `cargo test --release -- --ignored perf_probe`. Reference numbers on a
+    /// 2026 laptop with a full 100k index: 19ms of index preparation, then
+    /// 60ms per keystroke for a broad query and 34ms for a specific one.
+    /// Scoring stays O(query x path) per row, so a big jump means the byte
+    /// prefilter or the reusable scratch buffers stopped working.
+    #[test]
+    #[ignore = "manual perf probe"]
+    fn perf_probe_directory_picker_cost() {
+        let root = tempfile::tempdir().unwrap();
+        let base = root.path().to_string_lossy().into_owned();
+        let paths: Vec<String> = (0..100_000)
+            .map(|i| format!("{base}/projects/group{i:05}/leaf-app-{i}"))
+            .collect();
+        let mut picker = DirPicker::open(base.clone(), Vec::new());
+        let started = std::time::Instant::now();
+        picker.indexed = index_rows(paths);
+        eprintln!("index build: {:?}", started.elapsed());
+        for query in ["leapp7", "group99999"] {
+            let started = std::time::Instant::now();
+            for ch in query.chars() {
+                picker.press(ch);
+            }
+            eprintln!(
+                "  {query}: {:?} over {} keystrokes, {} rows",
+                started.elapsed(),
+                query.len(),
+                picker.candidates.len()
+            );
+            picker.clear_query();
+        }
+    }
+
+    #[test]
     fn recursive_index_keeps_all_rows_and_matches_nested_path_fragments() {
         let root = tempfile::tempdir().unwrap();
         let base = root.path().to_string_lossy().into_owned();
         let mut picker = DirPicker::open(base.clone(), Vec::new());
-        picker.indexed = (0..300)
-            .map(|i| format!("{base}/projects/group{i:03}/deep-app"))
-            .collect();
+        picker.indexed = index_rows(
+            (0..300)
+                .map(|i| format!("{base}/projects/group{i:03}/deep-app"))
+                .collect(),
+        );
         picker.rebuild();
         assert!(picker.candidates.len() >= 300);
         for ch in "group299/dapp".chars() {

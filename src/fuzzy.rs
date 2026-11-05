@@ -23,28 +23,103 @@ const GAP: i64 = 8;
 /// prefix, word start, contiguous substring, then a tight subsequence ranked
 /// above a distant one. Matching is by character, never by byte.
 pub fn fuzzy_score(query: &str, target: &str) -> Option<usize> {
-    let query: Vec<char> = query.trim().to_lowercase().chars().collect();
-    if query.is_empty() {
-        return Some(0);
+    let target = target.to_lowercase();
+    QueryScorer::new(query).score_lowercase(&target, &mut ScoreScratch::default())
+}
+
+/// One query prepared for repeated scoring. Pickers score a large candidate
+/// list per keystroke, so normalizing the query once keeps case folding out of
+/// the per-row path. Scores are identical to [`fuzzy_score`].
+pub struct QueryScorer {
+    chars: Vec<char>,
+    text: String,
+    /// Byte-level fast paths are only sound for an ASCII query: in UTF-8 an
+    /// ASCII byte never hides inside a multi-byte character, so an ASCII query
+    /// can be matched byte by byte, while any non-ASCII query stays on the
+    /// character path.
+    ascii_only: bool,
+}
+
+/// Scratch buffers reused across candidate rows while one query is scored.
+#[derive(Default)]
+pub struct ScoreScratch {
+    chars: Vec<char>,
+    dp: Vec<Option<i64>>,
+    dp_next: Vec<Option<i64>>,
+}
+
+impl QueryScorer {
+    pub fn new(query: &str) -> Self {
+        let query = query.trim().to_lowercase();
+        Self {
+            ascii_only: query.is_ascii(),
+            chars: query.chars().collect(),
+            text: query,
+        }
     }
-    let target_chars: Vec<char> = target.to_lowercase().chars().collect();
-    let target_text: String = target_chars.iter().collect();
-    let query_text: String = query.iter().collect();
-    if target_text == query_text {
-        return Some(EXACT);
+
+    pub fn is_empty(&self) -> bool {
+        self.chars.is_empty()
     }
-    if let Some(byte_at) = target_text.find(&query_text) {
-        let at = target_text[..byte_at].chars().count();
-        let band = if at == 0 {
-            PREFIX
-        } else if is_word_start(&target_chars, at) {
-            WORD_START
-        } else {
-            SUBSTRING
-        };
-        return Some(band.saturating_sub(at));
+
+    /// `target` must already be lowercased, as an indexed row's name and
+    /// relative path are, so case folding never runs per row.
+    pub fn score_lowercase(&self, target: &str, scratch: &mut ScoreScratch) -> Option<usize> {
+        if self.is_empty() {
+            return Some(0);
+        }
+        // Every query character must occur at all: a byte scan rejects most
+        // rows before any allocation or dynamic programming happens.
+        if self.ascii_only {
+            for ch in self.text.chars() {
+                if !target.contains(ch) {
+                    return None;
+                }
+            }
+        }
+        let ScoreScratch {
+            chars: target_chars,
+            dp,
+            dp_next,
+        } = scratch;
+        target_chars.clear();
+        target_chars.extend(target.chars());
+        if self.text == *target {
+            return Some(EXACT);
+        }
+        if let Some(byte_at) = target.find(&self.text) {
+            let at = target[..byte_at].chars().count();
+            let band = if at == 0 {
+                PREFIX
+            } else if is_word_start(target_chars, at) {
+                WORD_START
+            } else {
+                SUBSTRING
+            };
+            return Some(band.saturating_sub(at));
+        }
+        // Accept-only greedy pass on bytes: it accepts exactly when the table
+        // below can find an alignment, so scoring is unchanged.
+        if self.ascii_only && !contains_subsequence(target.as_bytes(), self.text.as_bytes()) {
+            return None;
+        }
+        subsequence_score(&self.chars, target_chars, dp, dp_next)
+            .map(|score| score.min(SUBSTRING - 1))
     }
-    subsequence_score(&query, &target_chars).map(|score| score.min(SUBSTRING - 1))
+}
+
+/// True when every query byte appears in the target in order.
+fn contains_subsequence(target: &[u8], query: &[u8]) -> bool {
+    let mut wanted = 0;
+    for byte in target {
+        if *byte == query[wanted] {
+            wanted += 1;
+            if wanted == query.len() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn is_word_start(target: &[char], at: usize) -> bool {
@@ -55,15 +130,26 @@ fn is_word_start(target: &[char], at: usize) -> bool {
 }
 
 /// Best scoring subsequence alignment of `query` inside `target`.
-fn subsequence_score(query: &[char], target: &[char]) -> Option<usize> {
+fn word_bonus(target: &[char], at: usize) -> i64 {
+    i64::from(is_word_start(target, at)) * WORD_BONUS
+}
+
+fn subsequence_score(
+    query: &[char],
+    target: &[char],
+    layer: &mut Vec<Option<i64>>,
+    next: &mut Vec<Option<i64>>,
+) -> Option<usize> {
     // One cell per target position keeps every query update O(query * target).
-    let mut layer: Vec<Option<i64>> = target
-        .iter()
-        .enumerate()
-        .map(|(at, ch)| (*ch == query[0]).then(|| SUBSEQUENCE as i64 + word_bonus(target, at)))
-        .collect();
+    // Both layers are caller-owned so a scored batch never reallocates per row.
+    layer.resize(target.len(), None);
+    for (at, ch) in target.iter().enumerate() {
+        layer[at] = (*ch == query[0]).then(|| SUBSEQUENCE as i64 + word_bonus(target, at));
+    }
     for wanted in &query[1..] {
-        let mut next = vec![None; target.len()];
+        // Reused buffers must not carry a previous row's or layer's cells.
+        next.clear();
+        next.resize(target.len(), None);
         let mut distant: Option<i64> = None;
         for at in 0..target.len() {
             distant = distant.map(|value| value - GAP);
@@ -89,17 +175,14 @@ fn subsequence_score(query: &[char], target: &[char]) -> Option<usize> {
         if next.iter().all(Option::is_none) {
             return None;
         }
-        layer = next;
+        std::mem::swap(layer, next);
     }
     layer
-        .into_iter()
+        .iter()
+        .copied()
         .flatten()
         .max()
         .map(|value| value.max(1) as usize)
-}
-
-fn word_bonus(target: &[char], at: usize) -> i64 {
-    i64::from(is_word_start(target, at)) * WORD_BONUS
 }
 
 #[cfg(test)]
