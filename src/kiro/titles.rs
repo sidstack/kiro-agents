@@ -15,6 +15,7 @@ use std::{
 const MAX_FILES: usize = 10_000;
 const MAX_JSON: u64 = 64 * 1024;
 const MAX_RECORD: usize = 16 * 1024;
+const MAX_RECORDS: usize = 8;
 const MAX_ANCESTORS: usize = 12;
 
 pub struct NativeNames {
@@ -251,7 +252,12 @@ fn first_message_title(path: &Path) -> Option<String> {
         return None;
     }
     let mut reader = BufReader::new(File::open(path).ok()?);
-    for _ in 0..8 {
+    // Only whole records inside the size bound are parsed. An oversized record
+    // is skipped and the scan resynchronises on its terminating newline, so one
+    // long system or context record can neither abort the scan nor swallow the
+    // Prompt record after it. Each read is capped, so the total stay bounded.
+    let mut at_boundary = true;
+    for _ in 0..MAX_RECORDS {
         let mut line = Vec::new();
         reader
             .by_ref()
@@ -261,18 +267,31 @@ fn first_message_title(path: &Path) -> Option<String> {
         if line.is_empty() {
             break;
         }
-        if line.len() > MAX_RECORD {
-            return None;
+        let ended_on_newline = line.last() == Some(&b'\n');
+        let usable = at_boundary && ended_on_newline && line.len() <= MAX_RECORD;
+        at_boundary = ended_on_newline;
+        if !usable {
+            continue;
         }
         let Ok(record) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
-        // Tagged native records only: never derive a name from assistant/tool output.
-        let kind = record.get("kind").and_then(Value::as_str)?;
+        // Tagged native records only: never derive a name from assistant/tool
+        // output. An untagged or oddly shaped native record is skipped so a
+        // schema header or newer record shape cannot hide a later Prompt.
+        let Some(kind) = record.get("kind").and_then(Value::as_str) else {
+            continue;
+        };
         if !matches!(kind, "Prompt") {
             continue;
         }
-        let content = record.get("data")?.get("content")?.as_array()?;
+        let Some(content) = record
+            .get("data")
+            .and_then(|data| data.get("content"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
         let text = content
             .iter()
             .filter_map(|part| {
@@ -471,6 +490,67 @@ mod tests {
         );
         fs::write(transcript, "x".repeat(MAX_RECORD + 1)).unwrap();
         fixture(root.path(), "native", &row, "");
+        assert!(NativeNames::new(root.path().into(), true)
+            .title(&row)
+            .is_none());
+    }
+
+    #[test]
+    fn oddly_shaped_and_oversized_records_are_skipped_not_fatal() {
+        let root = tempfile::tempdir().unwrap();
+        let row = session(root.path());
+        fixture(root.path(), "native", &row, "");
+        let transcript = root.path().join("native.jsonl");
+        let prompt = |text: &str| {
+            format!(
+                "{{\"kind\":\"Prompt\",\"data\":{{\"content\":[{{\"kind\":\"text\",\"data\":\"{text}\"}}]}}}}\n"
+            )
+        };
+
+        // Untagged and unexpectedly shaped native records must not end the scan.
+        fs::write(
+            &transcript,
+            concat!(
+                "{\"schemaVersion\":1}\n",
+                "{\"kind\":null,\"data\":\"not a tag\"}\n",
+                "{\"kind\":\"Prompt\",\"data\":\"unexpected shape\"}\n",
+            ),
+        )
+        .unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .and_then(|mut file| {
+                use std::io::Write;
+                file.write_all(prompt("Fix title derivation for odd records").as_bytes())
+            })
+            .unwrap();
+        let title = NativeNames::new(root.path().into(), true)
+            .title(&row)
+            .unwrap();
+        assert_eq!(title.text, "Fix title derivation for odd records");
+        assert_eq!(title.source, "first_message");
+
+        // A leading record past the read bound is skipped, and the scan
+        // resynchronises so the next whole record is still readable.
+        let oversized = format!("{{\"blob\":\"{}\"}}\n", "x".repeat(MAX_RECORD + 4096));
+        fs::write(
+            &transcript,
+            format!("{oversized}{}", prompt("Found after a huge record")),
+        )
+        .unwrap();
+        let title = NativeNames::new(root.path().into(), true)
+            .title(&row)
+            .unwrap();
+        assert_eq!(title.text, "Found after a huge record");
+
+        // Reading stays bounded: eight capped reads, whatever the file holds.
+        let beyond = format!(
+            "{}{}",
+            "x".repeat((MAX_RECORD + 1) * 20),
+            prompt("Never reached")
+        );
+        fs::write(&transcript, beyond).unwrap();
         assert!(NativeNames::new(root.path().into(), true)
             .title(&row)
             .is_none());
