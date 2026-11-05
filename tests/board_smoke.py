@@ -176,7 +176,7 @@ def main():
             board.search(history["id"])
             before = rows()
             board.press(b"\r")
-            assert b"Cannot attach" in board.screen()
+            assert b"Ctrl+O" in board.screen()
             assert rows() == before, "History selection must not spawn or attach"
             board.press(b"\x1b")
             board.filter(False)

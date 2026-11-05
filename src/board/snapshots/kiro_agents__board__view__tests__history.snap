@@ -1,6 +1,6 @@
 ---
 source: src/board/view.rs
-expression: "render(&board, &Mode::Browse, 100, 20)"
+expression: "render(&board, &Mode::Browse, 100, 20, false)"
 ---
 ┌Kiro sessions · v<version>────────────────────────────────────────────────────────────────────────────┐
 │ ALL   0/8 live  ·  1 historical  ·  Search:                                                      │
@@ -16,8 +16,8 @@ expression: "render(&board, &Mode::Browse, 100, 20)"
 │                                                                                                  │
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-Cannot attach: session is exited (exit 0). Use Kiro history manually or Ctrl+N for a fresh session.
+exited · No verified conversation ID; use Ctrl+O to find it
 
 
 ↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh
-Ctrl+N create · m move here · F2 rename · Ctrl+K stop · q/Ctrl+Q quit
+Ctrl+N create · m move here · F2 rename · Ctrl+K stop · Ctrl+O history · q/Ctrl+Q quit

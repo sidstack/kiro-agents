@@ -1,4 +1,5 @@
 mod directories;
+mod history;
 mod model;
 mod picker;
 mod screen;
@@ -8,10 +9,12 @@ use crate::{
     attach,
     features::{PanePlacement, WorkspaceFeature},
     host, kiro,
-    protocol::{Action, Reply, SessionInfo},
+    protocol::{self, Action, Reply, SessionInfo},
 };
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use history::{HistoryPicker, SCAN_TIMEOUT};
+use kiro::history::HistoryScanHandle;
 use model::Board;
 use picker::{Accepted, AgentPicker, DirPicker};
 use screen::Screen;
@@ -27,6 +30,10 @@ use std::{
 enum Mode {
     Browse,
     Search,
+    /// Quick-open over Kiro's own conversation stores. The picker state lives
+    /// on the App because its loaded rows are far larger than a keystroke's
+    /// worth of state and must survive a placement detour.
+    History,
     Directory(DirPicker),
     Agent {
         directory: DirPicker,
@@ -61,6 +68,10 @@ enum PlacementFlow {
         directory: DirPicker,
         picker: Box<AgentPicker>,
     },
+    Resume {
+        cwd: String,
+        native_id: String,
+    },
 }
 
 enum Effect {
@@ -76,6 +87,17 @@ enum Effect {
     Create {
         cwd: String,
         agent: Option<String>,
+    },
+    /// Resume one native conversation the user chose in the history picker.
+    Resume {
+        cwd: String,
+        native_id: String,
+    },
+    /// Floating dashboard only: resume into a chosen pane.
+    ResumePlaced {
+        cwd: String,
+        native_id: String,
+        placement: PanePlacement,
     },
     /// Floating dashboard only: focus the selected live session in its pane.
     Focus(String, bool),
@@ -104,7 +126,44 @@ struct App {
     message: String,
     scan: Option<kiro::AgentScanHandle>,
     scan_token: u64,
+    history: HistoryPicker,
+    history_scan: Option<HistoryScanHandle>,
+    history_token: u64,
     popup: bool,
+}
+
+impl App {
+    /// Start (or restart) the read-only store scan behind the history picker.
+    fn open_history(&mut self) {
+        self.history_token += 1;
+        // Dropping the previous handle cancels and joins its worker.
+        self.history_scan = None;
+        self.history = HistoryPicker {
+            scanning: true,
+            ..HistoryPicker::default()
+        };
+        self.history_scan = Some(kiro::history::spawn_history_scan(
+            self.history_token,
+            SCAN_TIMEOUT,
+        ));
+        self.mode = Mode::History;
+        self.message.clear();
+    }
+}
+
+/// A closed connection does not establish whether the host accepted the
+/// request. It may have started the child before the reply was lost.
+fn resume_failure(error: &anyhow::Error, _state: &Path) -> String {
+    if matches!(
+        error.downcast_ref::<protocol::FrameError>(),
+        Some(protocol::FrameError::Closed)
+    ) {
+        return "Resume outcome unknown — the host closed the request before replying; \
+                the session may or may not have started. Check the session list \
+                before retrying. An older host may not support history resume."
+            .to_owned();
+    }
+    format!("Resume failed: {error:#}")
 }
 
 impl App {
@@ -139,6 +198,19 @@ impl App {
                     self.message.clear();
                     return None;
                 }
+                KeyCode::Char('o') => {
+                    if matches!(self.mode, Mode::Browse | Mode::History) {
+                        if matches!(self.mode, Mode::History) {
+                            self.mode = Mode::Browse;
+                            self.history_scan = None;
+                        } else {
+                            self.open_history();
+                        }
+                    } else {
+                        self.message = "Finish or cancel the current step first.".into();
+                    }
+                    return None;
+                }
                 KeyCode::Char('k') if matches!(self.mode, Mode::Browse) => {
                     if let Some(row) = self.board.selected().filter(|row| row.state == "live") {
                         self.mode = Mode::Stop(row.id.clone());
@@ -149,6 +221,7 @@ impl App {
                 }
                 KeyCode::Char('u') => {
                     match &mut self.mode {
+                        Mode::History => self.history.clear_query(&self.board.rows),
                         Mode::Rename { query, .. } => query.clear(),
                         Mode::Directory(picker) => picker.clear_query(),
                         Mode::Agent { picker, .. } => {
@@ -161,6 +234,10 @@ impl App {
                 }
                 KeyCode::Char('r') => {
                     match &mut self.mode {
+                        Mode::History => {
+                            self.open_history();
+                            return None;
+                        }
                         Mode::Directory(picker) => picker.refresh(),
                         Mode::Agent { picker, .. } => {
                             self.scan = None;
@@ -233,7 +310,23 @@ impl App {
                             }
                             return Some(Effect::Attach(row.id.clone()));
                         }
-                        self.message = format!("Cannot attach: session is {}. Create a fresh session or use Kiro history manually.", row.state);
+                        if row.generation != "v2" {
+                            self.message =
+                                "This session's generation is not supported for resume.".into();
+                        } else if let Some(native_id) = row.native_id.clone() {
+                            let cwd = row.cwd.clone();
+                            if self.popup {
+                                self.mode = Mode::Placement {
+                                    flow: PlacementFlow::Resume { cwd, native_id },
+                                    selected: default_placement_index(),
+                                };
+                                self.message.clear();
+                            } else {
+                                return Some(Effect::Resume { cwd, native_id });
+                            }
+                        } else {
+                            self.message = "This session has no verified Kiro conversation ID. Use Ctrl+O to find it in history.".into();
+                        }
                     }
                 }
                 _ => (),
@@ -253,6 +346,76 @@ impl App {
                     let mut query = self.board.query.clone();
                     query.push(ch);
                     self.board.set_query(query);
+                }
+                _ => (),
+            },
+            Mode::History => match key.code {
+                KeyCode::Esc => {
+                    self.history_scan = None;
+                    self.mode = Mode::Browse;
+                    self.message.clear();
+                }
+                KeyCode::Backspace => {
+                    self.history.backspace(&self.board.rows);
+                    self.message.clear();
+                }
+                KeyCode::Char(ch) if !ch.is_control() => {
+                    // A new query replaces the previous row's explanation.
+                    self.history.press(ch, &self.board.rows);
+                    self.message.clear();
+                }
+                KeyCode::Up => self.history.move_selection(-1),
+                KeyCode::Down => self.history.move_selection(1),
+                KeyCode::PageUp => self.history.move_selection(-8),
+                KeyCode::PageDown => self.history.move_selection(8),
+                KeyCode::Enter => {
+                    let Some(hit) = self.history.selected_hit().cloned() else {
+                        self.message =
+                            "Nothing to open. Type to search, or Ctrl+Q returns.".to_owned();
+                        return None;
+                    };
+                    if let Some(session) = hit.owned_by.clone() {
+                        // A conversation we already supervise is attached, never
+                        // started a second time.
+                        return Some(if self.popup {
+                            Effect::Focus(
+                                session,
+                                key.modifiers.contains(KeyModifiers::SHIFT)
+                                    || key.code == KeyCode::Char('f'),
+                            )
+                        } else {
+                            Effect::Attach(session)
+                        });
+                    }
+                    match hit.decision.reason() {
+                        Some(reason) => self.message = reason.to_owned(),
+                        None => {
+                            let Some(cwd) = hit.cwd.clone() else {
+                                self.message = "Kiro did not record a project directory.".into();
+                                return None;
+                            };
+                            if !Path::new(&cwd).is_dir() {
+                                self.message =
+                                    format!("Project directory {cwd} is no longer available.");
+                                return None;
+                            }
+                            if self.popup {
+                                self.mode = Mode::Placement {
+                                    flow: PlacementFlow::Resume {
+                                        cwd: cwd.clone(),
+                                        native_id: hit.native_id.clone(),
+                                    },
+                                    selected: default_placement_index(),
+                                };
+                                self.message.clear();
+                            } else {
+                                return Some(Effect::Resume {
+                                    cwd,
+                                    native_id: hit.native_id.clone(),
+                                });
+                            }
+                        }
+                    }
                 }
                 _ => (),
             },
@@ -345,6 +508,7 @@ impl App {
                 KeyCode::Esc => {
                     let back = match flow {
                         PlacementFlow::Existing { .. } | PlacementFlow::Move { .. } => Mode::Browse,
+                        PlacementFlow::Resume { .. } => Mode::History,
                         PlacementFlow::Create {
                             directory, picker, ..
                         } => Mode::Agent {
@@ -379,6 +543,11 @@ impl App {
                         PlacementFlow::Create { cwd, agent, .. } => Effect::CreatePlaced {
                             cwd: cwd.clone(),
                             agent: agent.clone(),
+                            placement,
+                        },
+                        PlacementFlow::Resume { cwd, native_id } => Effect::ResumePlaced {
+                            cwd: cwd.clone(),
+                            native_id: native_id.clone(),
                             placement,
                         },
                     };
@@ -450,6 +619,17 @@ impl App {
             self.scan = None;
             if let Mode::Agent { picker, .. } = &mut self.mode {
                 return picker.apply(scan);
+            }
+        }
+        let history_result = self
+            .history_scan
+            .as_ref()
+            .and_then(|scan| scan.try_recv().ok());
+        if let Some(scan) = history_result {
+            self.history_scan = None;
+            if scan.token == self.history_token {
+                let changed = self.history.apply(scan, &self.board.rows);
+                return directories_changed || changed;
             }
         }
         directories_changed
@@ -568,6 +748,9 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
         message: "Loading sessions…".into(),
         scan: None,
         scan_token: 0,
+        history: HistoryPicker::default(),
+        history_scan: None,
+        history_token: 0,
         popup: navigator.is_some(),
     };
     let mut origin_session =
@@ -590,9 +773,16 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
         }
         dirty |= app.poll_scan();
         if dirty {
-            screen
-                .terminal
-                .draw(|frame| view::draw(frame, &app.board, &app.mode, &app.message, app.popup))?;
+            screen.terminal.draw(|frame| {
+                view::draw(
+                    frame,
+                    &app.board,
+                    &app.mode,
+                    &app.message,
+                    app.popup,
+                    &app.history,
+                )
+            })?;
             dirty = false;
         }
         let effect = if event::poll(Duration::from_millis(40))? {
@@ -716,7 +906,14 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
                 if let Some(navigator) = navigator {
                     app.message = "Starting native Kiro…".into();
                     screen.terminal.draw(|frame| {
-                        view::draw(frame, &app.board, &app.mode, &app.message, app.popup)
+                        view::draw(
+                            frame,
+                            &app.board,
+                            &app.mode,
+                            &app.message,
+                            app.popup,
+                            &app.history,
+                        )
                     })?;
                     match host::call(dir, Action::New { cwd, agent }, true) {
                         Ok(Reply::Created(row)) => {
@@ -746,14 +943,101 @@ fn run_board(dir: &Path, navigator: Option<&dyn WorkspaceFeature>) -> Result<()>
                     dirty = true;
                 }
             }
-            Some(effect @ (Effect::Attach(_) | Effect::Move(_) | Effect::Create { .. })) => {
+            Some(Effect::ResumePlaced {
+                cwd,
+                native_id,
+                placement,
+            }) => {
+                if let Some(navigator) = navigator {
+                    app.message = "Resuming that conversation in native Kiro…".into();
+                    screen.terminal.draw(|frame| {
+                        view::draw(
+                            frame,
+                            &app.board,
+                            &app.mode,
+                            &app.message,
+                            app.popup,
+                            &app.history,
+                        )
+                    })?;
+                    match host::call(dir, Action::Resume { cwd, native_id }, true) {
+                        Ok(Reply::Created(row)) => {
+                            let created = *row;
+                            app.board.rows.push(created.clone());
+                            app.board.select_id(&created.id);
+                            app.mode = Mode::Browse;
+                            match navigator.open_session(
+                                &created.id,
+                                Path::new(&created.cwd),
+                                placement,
+                            ) {
+                                Ok(()) => return Ok(()),
+                                Err(error) => {
+                                    app.message = format!(
+                                    "Conversation resumed; workspace placement failed: {error:#}"
+                                )
+                                }
+                            }
+                        }
+                        Ok(_) => app.message = "Unexpected resume response".into(),
+                        Err(error) => app.message = resume_failure(&error, dir),
+                    }
+                    refresh = Some(refresh_task(dir));
+                    last_refresh = Instant::now();
+                    dirty = true;
+                }
+            }
+            Some(
+                effect @ (Effect::Attach(_)
+                | Effect::Move(_)
+                | Effect::Create { .. }
+                | Effect::Resume { .. }),
+            ) => {
                 let move_here = matches!(&effect, Effect::Move(_));
                 let id = match effect {
                     Effect::Attach(id) | Effect::Move(id) => Some(id),
+                    Effect::Resume { cwd, native_id } => {
+                        app.message = "Resuming that conversation in native Kiro…".into();
+                        screen.terminal.draw(|frame| {
+                            view::draw(
+                                frame,
+                                &app.board,
+                                &app.mode,
+                                &app.message,
+                                app.popup,
+                                &app.history,
+                            )
+                        })?;
+                        match host::call(dir, Action::Resume { cwd, native_id }, true) {
+                            Ok(Reply::Created(row)) => {
+                                let id = row.id.clone();
+                                app.board.rows.push(*row);
+                                app.board.set_query(String::new());
+                                app.board.select_id(&id);
+                                app.mode = Mode::Browse;
+                                Some(id)
+                            }
+                            Ok(_) => {
+                                app.message = "Unexpected resume response".into();
+                                None
+                            }
+                            Err(error) => {
+                                app.message = resume_failure(&error, dir);
+                                None
+                            }
+                        }
+                    }
                     Effect::Create { cwd, agent } => {
                         app.message = "Starting native Kiro…".into();
                         screen.terminal.draw(|frame| {
-                            view::draw(frame, &app.board, &app.mode, &app.message, app.popup)
+                            view::draw(
+                                frame,
+                                &app.board,
+                                &app.mode,
+                                &app.message,
+                                app.popup,
+                                &app.history,
+                            )
                         })?;
                         match host::call(dir, Action::New { cwd, agent }, true) {
                             Ok(Reply::Created(row)) => {
@@ -858,6 +1142,7 @@ mod tests {
             name: None,
             title: None,
             title_source: None,
+            native_id: None,
             id: "selected".into(),
             cwd: "/tmp".into(),
             agent: None,
@@ -868,6 +1153,9 @@ mod tests {
             notice: None,
         }]);
         App {
+            history: HistoryPicker::default(),
+            history_scan: None,
+            history_token: 0,
             board,
             mode: Mode::Browse,
             message: String::new(),
@@ -888,14 +1176,45 @@ mod tests {
     }
 
     #[test]
+    fn a_closed_resume_connection_has_an_unknown_outcome() {
+        let closed = anyhow::Error::from(protocol::FrameError::Closed);
+        let message = resume_failure(&closed, Path::new("/unused"));
+        assert!(message.contains("outcome unknown"), "{message}");
+        assert!(message.contains("may or may not have started"), "{message}");
+        assert!(!message.contains("shutdown"), "{message}");
+        assert_eq!(
+            resume_failure(&anyhow::anyhow!("boom"), Path::new("/unused")),
+            "Resume failed: boom"
+        );
+    }
+
+    #[test]
     fn history_is_explained_without_attach_or_stop() {
         let mut app = app("exited");
         assert!(app.key(key(KeyCode::Enter)).is_none());
-        assert!(app.message.contains("Cannot attach"));
+        assert!(app.message.contains("Ctrl+O"));
         assert!(app
             .key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))
             .is_none());
         assert!(matches!(app.mode, Mode::Browse));
+    }
+
+    #[test]
+    fn historical_row_with_identity_resumes_and_popup_offers_placement() {
+        let mut app = app("exited");
+        app.board.rows[0].native_id = Some("11111111-1111-4111-8111-111111111111".into());
+        assert!(
+            matches!(app.key(key(KeyCode::Enter)), Some(Effect::Resume { native_id, .. }) if native_id == "11111111-1111-4111-8111-111111111111")
+        );
+        app.popup = true;
+        assert!(app.key(key(KeyCode::Enter)).is_none());
+        assert!(matches!(
+            app.mode,
+            Mode::Placement {
+                flow: PlacementFlow::Resume { .. },
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1059,7 +1378,7 @@ mod tests {
         );
         let mut app = popup_app("exited");
         assert!(app.key(key(KeyCode::Enter)).is_none());
-        assert!(app.message.contains("Cannot attach"));
+        assert!(app.message.contains("Ctrl+O"));
     }
 
     #[test]

@@ -170,8 +170,18 @@ require `kiro-agents restart` after confirmation.
 Separate ratatui screen, not an overlay on Kiro's UI. Filters **Active** (ready, running,
 needs_input, failed), **Idle**, **All**; type to search sessions and projects; `Enter`
 attaches; `Ctrl+N` creates in another directory; `Ctrl+X` aborts the selected turn
-(`SIGINT` to the child's process group); `Ctrl+K` stops a session; `Ctrl+Q`/`Ctrl+Z` leave
+(`SIGINT` to the child's process group); `Ctrl+K` stops a session; `Ctrl+O` opens the
+read-only history quick-open (`Ctrl+R` rescans Kiro's session stores, `Enter` resumes
+the top row through `kiro-cli chat --v2 --tui --resume-id <id>`); `Ctrl+Q`/`Ctrl+Z` leave
 the board. Status line: `sessions 6 · 1 running · 2 needs input · 1 ready · Ctrl+Q`.
+
+Native history lives behind `src/kiro/history/`: one bounded scan calls read-only store
+adapters (`v1.rs` per-session file store, `v2.rs` per-workspace store) through a
+`StoreAdapter` trait, `search.rs` ranks the result with the same scorer as the pickers,
+and `resume.rs` decides whether one row may be opened and with which argv. The board
+never formats argv; it sends `Action::Resume { cwd, native_id }` to the host, which
+re-validates the id, lock and project directory before spawning. Locks are read, never
+written or removed. See [sessions](SESSIONS.md).
 
 ## Feature toggles
 

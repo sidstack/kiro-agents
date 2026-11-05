@@ -6,6 +6,16 @@ The current product still supports fresh V2 launches and live-process reattach o
 
 ## 1. Resume sessions from native Kiro stores
 
+Status: implemented for the `v1` per-session file store on
+`feat/historical-session-resume-search`. The `v2` per-workspace store has a
+read-only discovery adapter and its rows are listed with an explicit
+not-resumable-here reason; resuming that store's native ids is not verified, so it
+stays blocked. Kiro V3 stores are not probed or claimed. Fake-store coverage:
+`tests/history_resume.rs` (argv, cwd, locks, generation, supervision, no replay,
+metadata-only registry) and `tests/board_history.py` (real board PTY, Enter to
+resume, native store left byte-identical). Real authenticated resume against a live
+Kiro session is still a manual validation area.
+
 Goal: choose an earlier conversation and continue it from the dashboard, including
 stored sessions with no live wrapper process. Support both Kiro V2 and V3 stores
 through independently verified adapters.
@@ -58,6 +68,14 @@ locks, foreign processes, unavailable engine/profile, failed resume and crash re
 Real authenticated V2/V3 acceptance stays isolated and manually controlled.
 
 ## 2. Quick-open and full-text conversation search
+
+Status: implemented as the board's `Ctrl+O` quick-open on
+`feat/historical-session-resume-search`: one bounded in-memory scan over both store
+adapters, shared fuzzy ranker, all-terms matching over titles/projects/ids/agents and
+bounded prompt text, role-tagged snippets, coverage/truncation footer, background scan
+with cancellation. Kiro's native picker is not invoked: `kiro-cli --list-sessions`
+requires auth, so it cannot back an offline board (see `docs/FINDINGS.md`). No
+persistent index, no transcript in registry/diagnostics, no Kiro store writes.
 
 Goal: type words or a fuzzy query into a dashboard quick-open/search surface, find
 matching sessions across their actual conversation text, and choose one to attach or

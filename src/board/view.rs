@@ -1,3 +1,4 @@
+use super::history::{self, row_state, HistoryPicker};
 use super::{model::Board, picker::AgentStatus, Mode, PlacementFlow, PLACEMENTS};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -9,7 +10,14 @@ use ratatui::{
 
 const ACCENT: Color = Color::Cyan;
 
-pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str, popup: bool) {
+pub(super) fn draw(
+    frame: &mut Frame,
+    board: &Board,
+    mode: &Mode,
+    message: &str,
+    popup: bool,
+    history: &HistoryPicker,
+) {
     let area = frame.area();
     if area.width < 35 || area.height < 12 {
         frame.render_widget(
@@ -106,8 +114,9 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
                     format!("{}\nEnter attaches · Ctrl+Q returns here", row.cwd)
                 }
             } else {
-                format!("Cannot attach: session is {} (exit {}). Use Kiro history manually or Ctrl+N for a fresh session.\n{}",
-                    row.state, row.exit_code.map_or_else(|| "unknown".into(), |code| code.to_string()), row.notice.as_deref().unwrap_or(""))
+                format!("{} · {}\n{}", row.state,
+                    if row.native_id.is_some() { "Enter resumes this conversation" } else { "No verified conversation ID; use Ctrl+O to find it" },
+                    row.notice.as_deref().unwrap_or(""))
             },
         ),
     };
@@ -115,12 +124,12 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
     let (select_line, actions_line) = if popup {
         (
             "↑/↓ j/k select · Enter focus · Shift+Enter / f fullscreen · v/h split · w window",
-            "Ctrl+N new · m move here · F2 rename · Ctrl+K stop · / search · Esc closes popup",
+            "Ctrl+N new · m move here · F2 rename · Ctrl+K stop · / search · Ctrl+O history · Esc closes popup",
         )
     } else {
         (
             "↑/↓ j/k select · Enter attach · Tab Live/All · / search · r refresh",
-            "Ctrl+N create · m move here · F2 rename · Ctrl+K stop · q/Ctrl+Q quit",
+            "Ctrl+N create · m move here · F2 rename · Ctrl+K stop · Ctrl+O history · q/Ctrl+Q quit",
         )
     };
     frame.render_widget(
@@ -135,6 +144,7 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
     if matches!(
         mode,
         Mode::Directory(_)
+            | Mode::History
             | Mode::Agent { .. }
             | Mode::Move(_)
             | Mode::Stop(_)
@@ -261,6 +271,87 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
                 parts[2],
             );
         }
+        Mode::History => {
+            let area = modal(frame, "Kiro conversations · read-only quick-open");
+            let parts = Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Min(1),
+                Constraint::Length(6),
+            ])
+            .split(area);
+            frame.render_widget(
+                Paragraph::new(format!("Search conversations: {}", history.query)),
+                parts[0],
+            );
+            input_cursor(frame, parts[0], "Search conversations: ", &history.query, 0);
+            // Only the viewport is materialized; the scan may hold thousands of rows.
+            let visible = usize::from(parts[1].height).max(1);
+            let start = history.selected.saturating_sub(visible.saturating_sub(1));
+            let items = history
+                .hits
+                .iter()
+                .skip(start)
+                .take(visible)
+                .map(|hit| {
+                    let state = row_state(hit);
+                    let color = if hit.owned_by.is_some() {
+                        Color::Green
+                    } else if hit.decision.resumable() {
+                        Color::Cyan
+                    } else {
+                        Color::DarkGray
+                    };
+                    let context = hit.snippet.as_ref().map_or_else(
+                        || {
+                            hit.cwd
+                                .clone()
+                                .unwrap_or_else(|| "no recorded directory".into())
+                        },
+                        |snippet| format!("[{}] {}", snippet.role.label(), snippet.text),
+                    );
+                    ListItem::new(vec![
+                        Line::from(vec![
+                            Span::styled(
+                                format!("{}  ", hit.label),
+                                Style::default().add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(state, Style::default().fg(color)),
+                            Span::raw(format!(
+                                " · updated {}",
+                                history::updated_date(hit.updated_at_ms)
+                            )),
+                        ]),
+                        Line::styled(
+                            format!(
+                                "{} · {} · {}",
+                                hit.project,
+                                hit.agent.as_deref().unwrap_or("Kiro default"),
+                                context
+                            ),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ])
+                })
+                .collect::<Vec<_>>();
+            let mut state = ListState::default()
+                .with_selected((!history.hits.is_empty()).then_some(history.selected - start));
+            frame.render_stateful_widget(choice_list(items), parts[1], &mut state);
+            let mut lines = vec![
+                Line::raw("Type words or a fuzzy query · Enter opens the top row · ↑/↓ optional"),
+                Line::raw("Ctrl+R rescans · Ctrl+U clear · Ctrl+Q/Ctrl+O close · nothing is written to Kiro"),
+            ];
+            let notice = if message.is_empty() {
+                history.notice()
+            } else {
+                message.to_owned()
+            };
+            lines.extend(
+                notice
+                    .lines()
+                    .map(|line| Line::styled(line.to_owned(), Style::default().fg(Color::Yellow))),
+            );
+            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), parts[2]);
+        }
         Mode::Placement { flow, selected } => {
             let (title, context) = match flow {
                 PlacementFlow::Move { id, cwd } => (
@@ -270,6 +361,10 @@ pub(super) fn draw(frame: &mut Frame, board: &Board, mode: &Mode, message: &str,
                 PlacementFlow::Existing { id, cwd } => (
                     "Place session in the workspace",
                     format!("{id}\nDirectory: {cwd}"),
+                ),
+                PlacementFlow::Resume { cwd, native_id } => (
+                    "Resume conversation: placement",
+                    format!("Kiro session {native_id}\nDirectory: {cwd}"),
                 ),
                 PlacementFlow::Create { cwd, agent, .. } => (
                     "New session: placement · 3/3",
@@ -378,14 +473,16 @@ fn modal(frame: &mut Frame, title: &str) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::history::Coverage;
     use crate::board::picker::{AgentPicker, DirPicker};
+    use crate::kiro::history::StoreKind;
     use crate::protocol::SessionInfo;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn render(board: &Board, mode: &Mode, width: u16, height: u16, popup: bool) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
-            .draw(|frame| draw(frame, board, mode, "", popup))
+            .draw(|frame| draw(frame, board, mode, "", popup, &HistoryPicker::default()))
             .unwrap();
         let buffer = terminal.backend().buffer();
         (0..height)
@@ -399,6 +496,79 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
             .replace(env!("CARGO_PKG_VERSION"), "<version>")
+    }
+
+    fn history_picker() -> HistoryPicker {
+        use crate::kiro::history::{Conversation, LockState, TextRole, TextRun};
+        let record = |id: &str, title: &str, lock: LockState| Conversation {
+            native_id: id.into(),
+            stores: vec![StoreKind::Files],
+            title: Some(title.into()),
+            cwd: Some("/work/project".into()),
+            agent: Some("kiro_default".into()),
+            updated_at_ms: Some(1_793_098_763_000),
+            lock,
+            text: vec![TextRun {
+                role: TextRole::Prompt,
+                text: "repair the fuzzy picker ranking".into(),
+            }],
+            transcript: true,
+            unusable: None,
+        };
+        HistoryPicker {
+            records: vec![
+                record(
+                    "11111111-1111-4111-8111-111111111111",
+                    "Repair the picker",
+                    LockState::Free,
+                ),
+                record(
+                    "22222222-2222-4222-8222-222222222222",
+                    "Conversation in use",
+                    LockState::Open { pid: 4242 },
+                ),
+            ],
+            coverage: Coverage {
+                stores: vec![StoreKind::Files],
+                conversations: 2,
+                ..Coverage::default()
+            },
+            ..HistoryPicker::default()
+        }
+    }
+
+    fn render_with(history: &HistoryPicker, mode: &Mode) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &Board::default(), mode, "", false, history))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..24)
+            .map(|y| {
+                (0..100)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace(env!("CARGO_PKG_VERSION"), "<version>")
+    }
+
+    #[test]
+    fn history_quick_open_shows_provenance_lock_and_resume_state() {
+        let mut picker = history_picker();
+        picker.refresh(&[]);
+        for line in picker.hits.iter().map(|hit| hit.label.clone()) {
+            assert!(!line.is_empty());
+        }
+        let rendered = render_with(&picker, &Mode::History);
+        assert!(rendered.contains("Search conversations:"), "{rendered}");
+        assert!(rendered.contains("v1 · closed"), "{rendered}");
+        assert!(rendered.contains("open pid 4242"), "{rendered}");
+        assert!(rendered.contains("Searched v1 store(s)"), "{rendered}");
+        insta::assert_snapshot!("history-quick-open", rendered);
     }
 
     fn directory() -> DirPicker {
@@ -428,6 +598,7 @@ mod tests {
             name: None,
             title: None,
             title_source: None,
+            native_id: None,
             id: "session-one".into(),
             cwd: "/work/project".into(),
             agent: Some("reviewer".into()),
@@ -486,6 +657,7 @@ mod tests {
             name: None,
             title: None,
             title_source: None,
+            native_id: None,
             id: "session-one".into(),
             cwd: "/work/project".into(),
             agent: Some("reviewer".into()),

@@ -8,18 +8,29 @@ pub struct SessionTitle {
 /// Optional read-only enrichment; implementations hold no live child handles.
 pub trait SessionFeature: Send + Sync {
     fn title(&self, session: &SessionInfo) -> Option<SessionTitle>;
+
+    /// The native Kiro conversation id an owned live process holds, when the
+    /// store states it. Metadata only: never a transcript.
+    fn native_id(&self, _session: &SessionInfo) -> Option<String> {
+        None
+    }
 }
 
-pub fn clean_title(text: &str) -> Option<String> {
-    // Generated labels must not turn pasted credentials/auth links into registry metadata.
-    if text.contains("://")
+/// True when text carries a credential or auth link that must never reach
+/// wrapper metadata or a terminal echo.
+pub fn looks_sensitive(text: &str) -> bool {
+    text.contains("://")
         || text.contains("token=")
         || text.split_whitespace().any(|word| {
             ["sk-", "ghp_", "github_pat_", "AKIA", "Bearer"]
                 .iter()
                 .any(|prefix| word.starts_with(prefix))
         })
-    {
+}
+
+pub fn clean_title(text: &str) -> Option<String> {
+    // Generated labels must not turn pasted credentials/auth links into registry metadata.
+    if looks_sensitive(text) {
         return None;
     }
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");

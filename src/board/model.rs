@@ -108,7 +108,7 @@ impl Board {
         ]
         .into_iter()
         .chain(row.agent.as_deref())
-        .any(|field| super::picker::matches(query, field));
+        .any(|field| crate::fuzzy::matches(query, field));
         matches
     }
 
@@ -135,6 +135,7 @@ mod tests {
             name: None,
             title: None,
             title_source: None,
+            native_id: None,
             id: id.into(),
             cwd: cwd.into(),
             agent: agent.map(str::to_string),

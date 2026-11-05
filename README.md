@@ -120,6 +120,18 @@ prefers a manual name, then an exactly matched native Kiro title, a short first-
 title, and directory/agent plus a unique ID as the fallback. F2 names work even with an
 older running host. Automatic SQLite TUI titles are not supported until a verified
 store association exists; use F2 for those sessions. See [session names](docs/SESSION-NAMES.md).
+**Ctrl+O** opens Kiro's conversation history: a read-only quick-open over the
+sessions already stored on this machine. Type words from a prompt or title, a
+fuzzy query, or a session id; Enter resumes the top match through native Kiro.
+Discovery reads Kiro's own session stores and never writes to them. Rows state
+their store (`v1` file store, `v2` per-workspace store), whether a conversation
+is already open, and why a row cannot be opened here. A live Kiro hold is never
+taken over: close that session first. Resume never replays a prompt, re-runs a
+tool, or crosses a generation, so rows found only in the newer per-workspace store
+are listed for recognition and left to Kiro's own resume. Ctrl+R rescans the
+stores, Ctrl+U clears the query, Esc or Ctrl+O returns to the board. See
+[sessions](docs/SESSIONS.md).
+
 r refreshes; q or Ctrl+Q leaves sessions alive.
 Exited, stopped, and failed rows explain why they cannot be attached.
 

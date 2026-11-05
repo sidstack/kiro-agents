@@ -13,13 +13,33 @@ pub struct Request {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Action {
     Status,
-    New { cwd: String, agent: Option<String> },
-    Attach { id: String, cols: u16, rows: u16 },
-    Stop { id: String },
-    Rename { id: String, name: Option<String> },
+    New {
+        cwd: String,
+        agent: Option<String>,
+    },
+    /// Explicit user-requested resume of one native Kiro conversation.
+    Resume {
+        cwd: String,
+        native_id: String,
+    },
+    Attach {
+        id: String,
+        cols: u16,
+        rows: u16,
+    },
+    Stop {
+        id: String,
+    },
+    Rename {
+        id: String,
+        name: Option<String>,
+    },
     Shutdown,
     Input(Vec<u8>),
-    Resize { cols: u16, rows: u16 },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
     Detach,
 }
 
@@ -41,6 +61,10 @@ pub struct SessionInfo {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_source: Option<String>,
+    /// Native Kiro conversation id, when the store states one. Metadata only:
+    /// never a title, prompt, transcript or credential.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_id: Option<String>,
     pub id: String,
     pub cwd: String,
     pub agent: Option<String>,

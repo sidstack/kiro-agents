@@ -352,3 +352,77 @@ generation, or Kiro-owned files. PTY regressions cover consent/cancellation,
 round-trip movement with the same child PID, registration cleanup, refusal of a
 noninteractive destination, and an unregistered older frontend retaining its
 connection. Compatibility is also tested with a published v0.4.2 host.
+
+## 2026-10-28 — Native session stores and history quick-open
+
+Read-only probes of the installed `kiro-cli` 2.32.0 and this machine's Kiro state
+(`ls`, key enumeration and `jq`/`python` key listings only; no transcript text was
+copied into this repository or into logs).
+
+- `kiro-cli chat --help` advertises `--resume`, `--resume-id <SESSION_ID>`,
+  `--resume-picker`, `--sessions`, `-l/--list-sessions`, `--all-cwds`,
+  `--delete-session`, `--session-source <v1|v2>` and `--agent-engine`. Those store
+  labels (`v1` per-session file store, `v2` per-workspace store) are Kiro's own
+  vocabulary, so the board reuses them instead of inventing generation names.
+- Listing needs auth. `--list-sessions` started the OAuth device flow and reported an
+  authorization failure instead of listing sessions. The dashboard therefore cannot
+  use Kiro's listing for an offline quick-open; it reads the stores directly.
+- The `v1` file store is `<KIRO_HOME>/sessions/cli/` (this machine: 28 `*.json`,
+  28 `*.jsonl`, 22 `*.history`, 10 `*.lock`). Metadata keys are `session_id`, `cwd`,
+  `created_at`, `updated_at`, `title`, `session_created_reason` and `session_state`
+  (whose keys include `version`, `agent_name`, `permissions`, `goal`,
+  `conversation_metadata`, `rts_model_state`). Transcript records are
+  `{version, kind, data}` with `kind` Prompt / Assistant / ToolUse / ToolResult and
+  `data.content[]` items of `kind` text. `*.history` is plain user-prompt text.
+  Lock files hold `{"pid","started_at"}`.
+- The `v2` per-workspace store sits beside it as `<KIRO_HOME>/sessions/<16-hex>/`.
+  A session directory is `sess_<uuid>`, or `cli_<uuid>[_<suffix>]` for a conversation
+  imported into a workspace; the observed suffix was five uppercase letters.
+  `session.json` keys include `schemaVersion` (`1.0.0`), `dataModelVersion` (1), `id`
+  (equal to the directory name), `title`, `agentMode`, `workspacePaths`, `rootPaths`
+  (sometimes empty), `createdAt`, `lastModifiedAt` and a `_meta.kiro` object. There is
+  no `cwd` key. `session.json` alone is not proof of a transcript: `messages.jsonl`
+  exists only for some imported rows, as `{id, payload, timestamp}` envelopes whose
+  payload shape is unverified, so the adapter reads no transcript from this store.
+- The same conversation can exist in both stores: a `cli_<uuid>…` workspace directory
+  carries the same UUID as a `v1` `<uuid>.json`, and the observed real `id` repeated the
+  whole directory name, suffix included. The adapter takes the identity Kiro states in
+  that id, so an import merges with its file-store row into one result with both
+  provenances (this machine: `bb5bd3af-…` was present in both stores). `--resume-id`
+  documents the bare UUID shape, so only a conversation present in the `v1` file store
+  is offered for resume; a `sess_<uuid>`-only row is listed and explained instead, and a
+  workspace-store id has never been placed on a command line.
+- Kiro also keeps `<KIRO_HOME>/sessions/dashboard-search.db`, an SQLite FTS5 database
+  whose table set is `sessions`, `sessions_data`, `sessions_idx`, `sessions_content`,
+  `sessions_docsize`, `sessions_config` plus `marks`, and a
+  `<KIRO_HOME>/session-index/` with `sessions.json`, `session-aliases.json`,
+  `store-sources.json` and a `.migration-v3` marker. Neither is used by the adapters:
+  their schema is Kiro's, versioned by Kiro, and reading it would couple the wrapper
+  to an internal index. Quick-open scans the JSON stores with explicit budgets.
+- Resume argv is verified against the fake CLI, not against an authenticated Kiro
+  account: `tests/history_resume.rs` asserts `chat --v2 --tui --resume-id <uuid>` in
+  the recorded project directory, and `tests/board_history.py` drives Ctrl+O →
+  search → Enter through a real board PTY and asserts the native store is
+  byte-identical afterwards. End-to-end resume of a real authenticated conversation,
+  and Kiro's own errors for a missing profile or revoked auth, remain manual
+  validation areas.
+
+## 2026-11-02 — Pre-resume hosts close Resume requests without replying
+
+Reproduced against the pre-resume host build (main `31b478c`, v0.7.0) in a private
+state directory, fake CLI only, no real Kiro state:
+
+- The running host answers `Status` normally (`{"Sessions":[]}`), so the whole
+  dashboard works, but a `{"version":1,"action":{"Resume":…}}` request is
+  deserialized against the older `Action` enum, fails, and `handle()` returns the
+  error without sending any `Reply`. The client sees EOF and reports
+  "IPC connection closed". Adding a request variant without bumping `VERSION` is
+  therefore invisible to an already-running host.
+- Reproduction: start the old binary as `__host` with `KIRO_AGENTS_HOME` pointed at
+  a temp directory, connect to `host.sock`, send the frame above followed by a
+  newline, and read: EOF with no reply, while the same frame against the current
+  host returns `Created`.
+- This build does not replace an old host. A closed resume connection leaves the
+  outcome unknown: the board asks the user to check the session list before retrying.
+  EOF alone cannot prove host age, even on a second connection; a current host may
+  also close a connection without replying. (`tests/history_legacy.py`).

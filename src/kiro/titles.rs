@@ -30,7 +30,13 @@ impl NativeNames {
         }
     }
 
-    fn lookup(&self, session: &SessionInfo, started: SystemTime) -> Option<SessionTitle> {
+    /// The native conversation this owned process holds, as stated by its own
+    /// store metadata. Never inferred from recency, cwd alone or a PID alone.
+    fn native_identity(
+        &self,
+        session: &SessionInfo,
+        started: SystemTime,
+    ) -> Option<(String, PathBuf, Value)> {
         let root_pid = session.pid?;
         let mut matches = Vec::new();
         let mut entries = fs::read_dir(&self.directory).ok()?;
@@ -76,7 +82,7 @@ impl NativeNames {
             {
                 continue;
             }
-            matches.push((path, meta));
+            matches.push((id.to_owned(), path, meta));
             if matches.len() > 1 {
                 return None;
             }
@@ -84,7 +90,12 @@ impl NativeNames {
         if entries.next().is_some() {
             return None;
         }
-        let (lock, meta) = matches.pop()?;
+        matches.pop()
+    }
+
+    fn lookup(&self, session: &SessionInfo, started: SystemTime) -> Option<SessionTitle> {
+        let (native_id, lock, meta) = self.native_identity(session, started)?;
+        let _ = native_id;
         if let Some(title) = meta
             .get("title")
             .and_then(Value::as_str)
@@ -112,6 +123,22 @@ impl SessionFeature for NativeNames {
             return None;
         }
         self.lookup(session, process_started(session.pid?)?)
+    }
+
+    fn native_id(&self, session: &SessionInfo) -> Option<String> {
+        if session.state != "live" {
+            return None;
+        }
+        let (native_id, _, meta) = self.native_identity(session, process_started(session.pid?)?)?;
+        // Only an id the store itself states is reported, and it must be a
+        // shape the wrapper could one day resume.
+        if meta.get("session_id").and_then(Value::as_str) == Some(native_id.as_str())
+            && crate::kiro::history::is_resumable_native_id(&native_id)
+        {
+            Some(native_id)
+        } else {
+            None
+        }
     }
 }
 
@@ -177,7 +204,7 @@ fn owned_process_start_using(
     None
 }
 
-fn process_started(pid: u32) -> Option<SystemTime> {
+pub(crate) fn process_started(pid: u32) -> Option<SystemTime> {
     Some(process_identity(pid)?.started)
 }
 
@@ -348,6 +375,7 @@ mod tests {
             name: None,
             title: None,
             title_source: None,
+            native_id: None,
             id: "wrapper".into(),
             cwd: cwd.to_string_lossy().into_owned(),
             agent: None,
