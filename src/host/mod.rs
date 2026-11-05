@@ -26,7 +26,7 @@ use std::{
 };
 
 const RING_BYTES: usize = 2 * 1024 * 1024;
-const MAX_SESSIONS: usize = 8;
+pub(crate) const MAX_SESSIONS: usize = 8;
 type Shared = Arc<Mutex<Host>>;
 
 struct Session {
@@ -313,10 +313,29 @@ pub fn connect(dir: &Path, start: bool) -> Result<UnixStream> {
                     "Host startup failed ({status}); run kiro-agents __host to see the error"
                 );
             }
+            // A launcher that exits successfully lost the lock to another host.
+            // Give that host a short grace period to start listening instead of
+            // waiting out the whole startup deadline, then say what happened.
+            let grace = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < grace {
+                if let Ok(stream) = UnixStream::connect(&path) {
+                    return Ok(stream);
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            anyhow::bail!(
+                "another kiro-agents host owns the lock in {dir:?}, but its socket is not answering; run 'kiro-agents __host' in the foreground to diagnose"
+            );
         }
         thread::sleep(Duration::from_millis(25));
     }
-    Err(anyhow!("Host startup timed out"))
+    // The launcher is still running, so it holds the lock but has not served
+    // its socket. Naming the process beats a bare timeout: the user has to
+    // kill that host to recover.
+    Err(anyhow!(
+        "kiro-agents host (pid {}) is running but not answering its socket in {dir:?}; kill that process to recover",
+        launcher.id()
+    ))
 }
 
 pub fn call(dir: &Path, action: Action, start: bool) -> Result<Reply> {

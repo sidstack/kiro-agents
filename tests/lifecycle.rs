@@ -319,3 +319,20 @@ fn unknown_actions_get_an_explanatory_reply_not_a_closed_connection() {
     // The host stays healthy and keeps serving known actions.
     assert!(matches!(harness.call(Action::Status), Reply::Sessions(_)));
 }
+
+#[test]
+fn a_live_host_with_a_missing_socket_names_the_owner_instead_of_timing_out() {
+    let harness = Harness::new();
+    let state = harness.state();
+    // The lock and listener stay alive; only the socket path disappears.
+    fs::remove_file(state.join("host.sock")).unwrap();
+
+    let error = host::connect(&state, true).unwrap_err().to_string();
+    // A bare timeout hides that a healthy host owns the state directory, so the
+    // message has to say who to investigate rather than imply a cold start.
+    assert!(
+        error.contains("owns the lock") && error.contains("not answering"),
+        "unexpected startup error: {error}"
+    );
+    assert!(error.contains(&state.to_string_lossy().into_owned()));
+}
