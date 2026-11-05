@@ -5,6 +5,13 @@ Conventional Commits by release-please.
 
 ## Local MVP history (before automated releases)
 
+## [0.8.1](https://github.com/sidstack/kiro-agents/compare/v0.8.0...v0.8.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* address review findings in titles, picker and release paths ([#35](https://github.com/sidstack/kiro-agents/issues/35)) ([4a26633](https://github.com/sidstack/kiro-agents/commit/4a26633ae954fae156d29474313396ebc192208a))
+
 ## [0.8.0](https://github.com/sidstack/kiro-agents/compare/v0.7.0...v0.8.0) (2026-11-05)
 
 
