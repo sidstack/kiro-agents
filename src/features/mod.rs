@@ -14,6 +14,28 @@ pub trait SessionFeature: Send + Sync {
     fn native_id(&self, _session: &SessionInfo) -> Option<String> {
         None
     }
+
+    /// Resolve a whole Status pass at once. A feature that answers both
+    /// questions from one lookup (Kiro's session directory) overrides this so
+    /// one refresh costs one scan instead of one per live session. Results stay
+    /// in the same order as `sessions`.
+    fn enrich(&self, sessions: &[&SessionInfo]) -> Vec<Enrichment> {
+        sessions
+            .iter()
+            .map(|session| Enrichment {
+                title: self.title(session),
+                native_id: self.native_id(session),
+            })
+            .collect()
+    }
+}
+
+/// What one feature can say about a session in a Status batch. Either half may
+/// be absent; the host keeps the first feature that supplies each half.
+#[derive(Default)]
+pub struct Enrichment {
+    pub title: Option<SessionTitle>,
+    pub native_id: Option<String>,
 }
 
 /// True when text carries a credential or auth link that must never reach

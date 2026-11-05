@@ -218,38 +218,61 @@ impl Host {
 
     fn refresh_titles(&mut self) -> Result<()> {
         let mut changed = false;
-        for session in self
+        // One Status pass asks each feature about every live session at once:
+        // Kiro's session directory is then scanned once per refresh, not once
+        // per live session per question.
+        let live: Vec<String> = self
             .sessions
-            .values_mut()
-            .filter(|session| session.child.is_some())
-        {
-            // Native identity is enriched regardless of the session's label:
-            // a custom name must not hide which conversation the history
-            // picker could attach to instead of resuming.
-            if session.info.native_id.is_none() {
-                if let Some(native_id) = self
-                    .features
-                    .iter()
-                    .find_map(|feature| feature.native_id(&session.info))
-                {
-                    session.info.native_id = Some(native_id);
-                    changed = true;
+            .iter()
+            .filter(|(_, session)| session.child.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut titled = vec![false; live.len()];
+        for feature in &self.features {
+            let mut rows = Vec::new();
+            let mut asking = Vec::new();
+            for (position, id) in live.iter().enumerate() {
+                let Some(session) = self.sessions.get(id) else {
+                    continue;
+                };
+                // Native identity is enriched regardless of the session's
+                // label: a custom name must not hide which conversation the
+                // history picker could attach to instead of resuming.
+                let needs_id = session.info.native_id.is_none();
+                // Generated titles stay suppressed once the user named a session.
+                let needs_title = session.info.name.is_none() && !titled[position];
+                if !needs_id && !needs_title {
+                    continue;
                 }
+                rows.push(&session.info);
+                asking.push((position, needs_id, needs_title));
             }
-            // Generated titles stay suppressed once the user named a session.
-            if session.info.name.is_some() {
-                continue;
+            if rows.is_empty() {
+                break;
             }
-            for feature in &self.features {
-                if let Some(title) = feature.title(&session.info) {
-                    if session.info.title.as_deref() != Some(&title.text)
-                        || session.info.title_source.as_deref() != Some(title.source)
-                    {
-                        session.info.title = Some(title.text);
-                        session.info.title_source = Some(title.source.to_owned());
+            for ((position, needs_id, needs_title), enrichment) in
+                asking.into_iter().zip(feature.enrich(&rows))
+            {
+                let Some(session) = self.sessions.get_mut(&live[position]) else {
+                    continue;
+                };
+                if needs_id {
+                    if let Some(native_id) = enrichment.native_id {
+                        session.info.native_id = Some(native_id);
                         changed = true;
                     }
-                    break;
+                }
+                if needs_title {
+                    if let Some(title) = enrichment.title {
+                        titled[position] = true;
+                        if session.info.title.as_deref() != Some(&title.text)
+                            || session.info.title_source.as_deref() != Some(title.source)
+                        {
+                            session.info.title = Some(title.text);
+                            session.info.title_source = Some(title.source.to_owned());
+                            changed = true;
+                        }
+                    }
                 }
             }
         }
