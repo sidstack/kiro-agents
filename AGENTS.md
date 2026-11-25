@@ -1,246 +1,200 @@
-# Repository Guidelines
+# AGENTS.md — kiro-agents
 
-Published Rust 2021 application: https://github.com/sidstack/kiro-agents. Read `docs/ARCHITECTURE.md`, `docs/SESSIONS.md`, and
-`docs/GENERATION-SUPPORT.md` before changing lifecycle or Kiro-launch behavior. Update
-`docs/FINDINGS.md` whenever a probe contradicts a doc claim; findings beat documentation.
+Published Rust 2021 CLI (MIT, <https://github.com/sidstack/kiro-agents>) that keeps one
+`kiro-cli chat --v2 --tui` child per managed session on its own PTY under a long-lived per-user
+host, driven from a ratatui board. It supervises processes the user cares about, sits on their real
+Kiro state, and pipes raw bytes into a live agent: a wrong change can orphan Kiro processes, leak
+transcript material, or steal keystrokes. Shipped (Linux x86_64 binaries): fresh V2 launch,
+live-process reattach, read-only history quick-open, `v1`-store resume. Not shipped: V3 launching,
+cross-generation migration, hooks, per-workspace-store resume; `MVP vN` in `docs/journal/` is the
+product iteration, never a Kiro engine version.
 
-## Current scope and structure
+## Start here
 
-MVP v3 is the product iteration, not Kiro V3 engine support. The application creates
-fresh Kiro V2 sessions and reattaches to live owned processes. Do not imply that
-history resume, cross-generation migration, hooks or Kiro V3 launching are shipped.
+1. `.agents/PLAN.md` then the newest `.agents/JOURNAL.md` entry — the only current status records,
+   both **git-ignored**; a fresh clone has neither (see Rules). `docs/PLAN.md` is a dated
+   2026-10-16 roadmap snapshot, not status; tracked evidence sits in the newest
+   `docs/journal/<workstream>.md`.
+2. Lifecycle, attach, IPC or terminal ownership → `docs/ARCHITECTURE.md`; session unit, stores and
+   resume → `docs/SESSIONS.md`; Kiro argv, profiles, V2/V3 → `docs/GENERATION-SUPPORT.md` and
+   `docs/KIRO-INTEGRATION.md`; tmux → `docs/WORKSPACES.md`.
+3. A Pi-inspired interaction → `docs/PI-PARITY.md` first: `../pi-codex-agents` is the reference,
+   native Kiro ownership is the boundary.
 
-- `src/host/` — lifecycle, registry persistence, locks, IPC and owned PTY supervision.
-- `src/attach/` — native byte passthrough, resize and leader-key detach.
-- `src/board/` — ratatui dashboard, directory/agent selection, rendering and terminal ownership.
-- `src/kiro/` — Kiro argv, capability checks and bounded cancellable agent discovery.
-- `src/main.rs`, `src/lib.rs`, `src/protocol.rs` — CLI, library and IPC definitions.
-- `tests/` — Rust behavioral tests, Python PTY/packaging tests and `tests/fake-kiro`.
-- `docs/` — architecture, findings, parity, release/security policies and MVP journals.
-  `docs/journal/MVP-V3.md` records completed tasks and milestones.
-- `.github/` — checks, security/release workflows, Dependabot and contribution templates.
-- `scripts/package_release.py` — tagged binary packaging and checksums.
-- `install.sh` — verified release installation, explicit versions/betas and uninstall.
-- `probes/` — opt-in probe scripts and output; never shipped in the package.
+## Commands
 
-Use `../pi-codex-agents` as a dashboard interaction/parity reference when available.
-Preserve native Kiro ownership and the boundaries below when adapting an interaction.
+Development needs Linux, Rust stable (`rust-toolchain.toml` adds rustfmt/clippy), Python 3.10+ and a
+PTY; workspace tests need tmux 3.2+. End users need neither, and install/authenticate Kiro separately.
 
-## Hard rules
+- `make check` — **gate**: fmt, `clippy -D warnings`, tests, `cargo build --locked`, 18 fake-Kiro
+  PTY/installer/packaging scripts, `sh -n install.sh`. Done when it exits 0.
+- `cargo test --test lifecycle` — one Rust behavioral test target while iterating.
+- `python3 tests/board_smoke.py` — one board PTY scenario against fake Kiro.
+- `cargo build --locked && ./target/debug/kiro-agents --help` — CLI surface smoke. Source install:
+  `cargo install --path . --locked`; run `kiro-agents doctor` after any install or upgrade (release
+  installs go to `~/.local/bin`; policy: `docs/RELEASING.md`).
+- `make audit` — RustSec over the whole lockfile, on any `Cargo.lock` change and before a release
+  claim. Needs `cargo install cargo-audit --version 0.22.2 --locked` (the CI pin).
+- `make probe` — **opt-in, real Kiro CLI** (`cargo test --features probe -- --ignored`);
+  excluded from the gate. Use a temporary `KIRO_HOME`/`KIRO_SESSIONS_DIR` and a scratch dir.
 
-1. **Never write inside `~/.kiro/` or a project's `.kiro/`** except the single opt-in
-   telemetry Hook file. Kiro owns agents, sessions, steering, hooks, MCP, skills,
-   permissions, and settings.
-2. **One live child per Kiro session id.** Check the session lock before spawning; never kill
-   a foreign Kiro process.
-3. **No terminal emulation, no output parsing, no ACP client.** While attached, forward bytes
-   and resize only. The leader-key filter is the only exception.
-4. **Never synthesize or rewrite a Kiro agent profile.** Validate with
-   `kiro-cli agent validate` and surface Kiro's own errors.
-5. **Never resume across generations.** V2 sessions on `--v2`, V3 sessions on `--v3`.
-   `/upgrade-agent` is a user action, not ours.
-6. **Never auto-approve tools.** `--trust-all-tools` only on explicit unattended sessions,
-   always badged in the board.
-7. **Never replay a prompt or re-run a tool** after a host crash or restart.
-8. **Never log child environment, tokens, OAuth URLs, or transcript text.** Registry holds
-   metadata only; drafts stay in their own files.
-9. Optional features need a config toggle, cleanup on host close, enabled/disabled test
-   coverage, and docs. Core imports the feature trait, never a concrete feature module.
+## Rules
 
-## Build, test, and probe commands
+- Never write inside `~/.kiro/` or a project's `.kiro/`; instead read Kiro's files and let Kiro own
+  agents, sessions, steering, hooks, MCP, skills, permissions and settings. The single opt-in
+  telemetry Hook file is the only exception and must stay removable.
+- One live child per Kiro session id: check the native `<id>.lock` (PID + start time) before
+  spawning; never signal or kill a foreign Kiro process — signal only an owned, unreaped child.
+- Never emulate a terminal, parse Kiro output, or write an ACP client; while attached forward
+  bytes and resize (`TIOCSWINSZ` + SIGWINCH) only — the frontend leader-key filter is the sole
+  exception, and Left Arrow always passes through.
+- Never synthesize or rewrite a Kiro agent profile; instead run `kiro-cli agent validate
+  --path <file>` and surface Kiro's own error. `/upgrade-agent` is a user action, not ours.
+- Never resume across generations: V2 sessions on `--v2`, V3 on `--v3`; this build launches
+  `chat --v2 --tui` only and its V3 probes are open questions (`docs/GENERATION-SUPPORT.md`).
+- Never auto-approve tools: `--trust-all-tools` only on an explicit unattended session, always
+  badged on the board row. Never replay a prompt or re-run a tool after a host crash or restart;
+  restore the row as failed and tell the user to review the transcript first.
+- Never log or commit child environment, tokens, OAuth URLs, transcript text, `host.log` or
+  scanner reports; the registry holds metadata only and drafts stay in their own files.
+- Never `println!` from the host, never `unwrap()` in `src/` outside tests: `tracing`, `anyhow` at
+  entry points, `thiserror` in library modules. Rust 2021, `cargo fmt` defaults,
+  `clippy -D warnings`; `snake_case` functions, `PascalCase` types, `kebab-case` files and crates.
+- Keep the seams honest: raw mode survives board → native Kiro → board and the board alternate
+  screen is released **only after the host attach ACK** (bounded wait, recovery on failure), so
+  native primary-screen scrollback works and wheel/PageUp bytes forward unchanged; discovery stays
+  bounded, cancellable, reaped as an owned process group, with default and manual fallback; board
+  rendering stays event-driven with status refresh off the input path.
+- Optional features need a config toggle, cleanup on host close, enabled **and** disabled tests and
+  docs; core imports the feature trait, never a concrete feature module (workspaces assemble
+  through `WorkspaceFeature`, host ownership independent). Layout: `src/host/` lifecycle, registry,
+  locks, IPC, PTY · `src/attach/` · `src/board/` · `src/kiro/` (only crate-internal Kiro
+  argv/format knowledge) · `src/workspace/` · `tests/` (+ `tests/fake-kiro`) · `probes/` never packaged.
+- Findings beat documentation: when a probe or real run contradicts a doc claim, append the dated
+  observation to `docs/FINDINGS.md` in the same change instead of arguing from the doc.
+- Never hand-bump a version, push a `vVERSION` tag, add a release-override footer or upload a
+  workstation build; Release Please derives the version from the squash-merge title
+  (`docs/RELEASING.md`). Never game the process — no ignored advisory, no weakened or skipped check
+  to ship a binary, no probe against the user's real `~/.kiro`, no paid model call in CI; instead
+  fix or pin, use fake Kiro with temporary state, keep real-CLI tests `#[ignore]`d and probe-gated
+  (`docs/SECURITY-REVIEW.md`).
+- Never use the user's default tmux server or edit `~/.tmux.conf`: only the private socket under
+  `KIRO_AGENTS_HOME/workspaces`, and closing a pane or workspace never stops a managed Kiro session.
+- Never assume `.agents/{SPEC,PLAN,JOURNAL}.md` exist: they are git-ignored, so a fresh clone or
+  another worktree has no plan. Where they are absent, say so in the handoff, treat `docs/PLAN.md`
+  as a dated snapshot, bootstrap from tracked docs and verified repository state without claiming
+  to have recovered earlier notes, and never write live records into a tracked file to fix that.
+  In linked worktrees the **primary checkout's** `.agents/` is canonical (`git worktree list`); the
+  coordinator owns shared plan/journal edits, workers report results.
+- Keep policies and changing evidence in their linked documents: never copy scan counts or release
+  mechanics back into this file; point at `docs/RELEASING.md`, `docs/SECURITY-REVIEW.md`,
+  `docs/SESSION-NAMES.md`, `docs/WORKSPACES.md`.
+- Keep GitHub's guards on: secret scanning, push protection, private vulnerability reporting,
+  dependency alerts, read-only PR tokens (`docs/SECURITY-REVIEW.md`).
 
-Development requires Linux, Rust stable and Python 3.10+ with a PTY-capable environment.
-`rust-toolchain.toml` selects stable with rustfmt and Clippy. End users installing the
-native binary need neither Rust nor Python; Kiro CLI is installed/authenticated separately.
+## Protocol invariants
 
-```sh
-make check                                # fmt, strict Clippy, Rust tests/build, PTY and packaging tests
-cargo install cargo-audit --version 0.22.2 --locked
-make audit                                # RustSec audit; warnings fail
-cargo run --bin kiro-agents -- --help
-cargo install --path . --locked            # install from source
-make probe                                # opt-in ignored real-CLI tests
-```
+`src/protocol.rs` is a versioned JSONL contract over a private Unix socket; the handshake enforces
+`PROTOCOL_VERSION`, never build identity (frames and limits: `docs/ARCHITECTURE.md`).
+- A new request variant added **without** bumping `VERSION` is invisible to a running host: it
+  cannot deserialize the frame and closes without replying, so the client sees EOF, not
+  "unsupported" (`docs/FINDINGS.md` 2026-11-02, `tests/history_legacy.py`).
+- Frontend-level capability (names, Ctrl+Q filtering, cooperative attachment moves) lives in shared
+  state-store metadata or the frontend — it never needs a new host RPC or a host restart.
+- The board never formats argv: it sends `Action::Resume { cwd, native_id }` and the host
+  revalidates the id shape, lock and directory before spawning. Only a Kiro-shaped UUID reaches a
+  command line. Locks are read, never written or removed; a limit-induced socket/IPC loss is an
+  error, never a success. Keep the pre-naming compatibility fixture (synthetic old peer in CI) and
+  version-independent rendering snapshots.
 
-Real-CLI probes must use a temporary `KIRO_HOME`/`KIRO_SESSIONS_DIR` and a scratch directory.
-Never run them against the user's real `~/.kiro`, and never make paid model calls in CI.
-Normal checks use fake Kiro and temporary state. Do not restart a live host merely to
-install an updated frontend; host restarts remain explicit user actions.
+## Decision table
 
-## Style
+| If | Use | Not |
+|---|---|---|
+| Add or change a Kiro flag | `src/kiro/` argv builder, asserted in `tests/history_resume.rs` against `tests/fake-kiro` | hand-built argv in `src/board/` or `src/main.rs` |
+| Return to the dashboard while attached | Ctrl+Q, filtered in the invoking frontend | Ctrl+G (Kiro's crew panel) or tmux's Ctrl+B prefix |
+| Scroll a primary-screen workspace pane | tmux copy mode via wheel/PageUp | injecting PageUp/Down or arrow keys into Kiro |
+| Publish a version | merge the generated Release Please PR; the squash title is the version input | `git tag`, edited `Cargo.toml`, local tarballs |
+| Upgrade a running system | install the binary and relaunch the frontend | restarting a live host or its managed sessions |
+| Name a session | F2 or `kiro-agents rename` into `~/.kiro-agents/names.json` | guessing from cwd, newest session, or terminal output |
+| Scope the next batch | a `docs/BACKLOG.md` batch of its own | folding backlog work into the current batch |
 
-Rust 2021, `cargo fmt` defaults, `clippy -D warnings`. `snake_case` modules and functions,
-`PascalCase` types, `kebab-case` file and crate names. Strict typing: no `unwrap()` in
-`src/` outside tests; use `anyhow` at entry points and `thiserror` in library modules.
-`tracing` for diagnostics, never `println!` from the host. ESM-style small modules with
-explicit boundaries: `kiro/` is the only crate-internal knowledge of Kiro argv and file
-formats.
+## Working loop
 
-## Tests
+1. Read the current records (`.agents/…`, else say they are missing) and the one contract doc
+   for the area. **Done when** you can name the module you will edit and the invariant you must
+   not break.
+2. Reproduce against `tests/fake-kiro` with temporary `KIRO_AGENTS_HOME`/`KIRO_HOME`.
+   **Done when** a failing `tests/<behavior>.rs` or PTY script shows the defect.
+3. Implement in the owning module only. **Done when**
+   `cargo clippy --all-targets --all-features -- -D warnings` is clean.
+4. Add the regression: lifecycle/host → Rust test; board rendering → `insta` snapshot;
+   terminal/PTY/keys → a fake-Kiro PTY script registered in the Makefile `check` target.
+   **Done when** it fails on the pre-change code and passes now.
+5. Run the gate. **Done when** `make check` exits 0; add `make audit` when dependencies moved.
+6. Any claim about real Kiro behavior needs a probe: run `make probe` with temporary Kiro
+   roots, then append the dated result to `docs/FINDINGS.md`. **Done when** the contradicting
+   doc line is fixed in the same commit.
+7. Commit (Conventional Commit subject), PR into `main`, naming which checks ran and which claims
+   stay manual — authenticated agent-list schema, real resume, Guacamole/MobaXterm scrolling and
+   clipboard are never inferred from fake-CLI green. **Done when** CI `check`, `rustsec` and
+   `beta-integration` (required on protected `main`, read 2026-11-25) are green.
 
-Name tests `tests/<behavior>.rs` and unit tests in-module. Every lifecycle change needs a
-behavioral regression test. Use `insta` snapshots for board rendering and `tests/fake-kiro`
-for PTY integration. Preserve raw mode through board → native Kiro → board; release the board alternate
-screen only after the host attach ACK so native primary-screen scrollback works, with
-a bounded wait and recovery on failure. Forward wheel/PageUp bytes unchanged.
-Keep directory/agent creation usable with selection alone. Agent discovery must stay
-bounded and cancellable, reap its owned process group, and retain default/manual fallback.
-Keep rendering event-driven and status refresh off the input path. Actual authenticated
-agent-list schema and Guacamole visual acceptance remain manual validation areas; fake
-CLI tests do not establish those claims. Keep real-CLI tests `#[ignore]`d and probe-gated.
+## Traps
 
-## Commits and PRs
+- Frontend burns 100% CPU after the PTY closes — crossterm's mio backend retries terminal EOF/EIO
+  inside poll — keep the `use-dev-tty` backend plus explicit terminal-hangup checks, and make
+  `tests/frontend_lifecycle.py` prove the frontend exits, not that tmux removed a pane
+  (`docs/INCIDENT-2026-10-26-CPU.md`).
+- Kiro processes reparent to PPID 1 and spin — ownership checks looked only at main-thread children
+  and missed Kiro's runtime-thread launcher chain — walk a bounded, start-time-checked descendant
+  parent chain; never guess by cwd.
+- Resume silently does nothing against an already-running older host — `VERSION` unchanged, so it
+  cannot deserialize the frame and closes without replying — treat EOF as an unknown outcome, ask
+  the user to check the session list, and never restart the host by itself.
+- Wheel or PageUp cycles Kiro's prompt history in a workspace pane — a primary-screen pane with no
+  native mouse request gives scrollback to tmux — route those keys to tmux copy mode and test real
+  viewport movement, not echoed bytes. Likewise a prefix-key test that passes while real users cannot
+  detach: `tmux send-keys` bypasses the client's prefix parser — drive prefix chords through a real
+  attached PTY client.
+- Installer fails with a missing asset just after a release — GitHub marks the release `latest`
+  before the binary job finishes uploading — keep the bounded asset retry; never weaken checksum,
+  archive or version verification (`docs/RELEASING.md`). A matching `--version` string does not
+  prove which binary is installed — compare the release checksum.
 
-Branch from `main`, PR into `main`; use Conventional Commit subjects and PR titles
-(`feat: add directory selection`, `fix: restore terminal modes`, `docs: clarify installation`).
-Use `!` or a `BREAKING CHANGE:` footer for breaking changes. Squash merges preserve the
-PR title for version calculation. Protected `main` requires `check` and `rustsec` checks
-and resolved conversations. PRs state what changed, why, and which checks ran; include
-`docs/FINDINGS.md` deltas when a probe changed an assumption.
+- The picker misses deeply nested projects — only ~200 immediate children/40 rows used to be ranked;
+  hidden, dependency, build and symlinked trees stay excluded on purpose — the recursive worker keeps
+  every row, reuses a 24 h path cache, and `Ctrl+R` forces a rescan.
+- "Already attached" when moving a session — attachment is exclusive terminal ownership of one shared
+  registry, not two session stores — use `m` + confirm or `attach <ID> --move`: token-checked frontend
+  lease release with a bounded wait, then ordinary Attach; never signal or kill the source, restart
+  the host, or change the protocol for this. Keep old-peer refusal, the native child PID, and
+  token-checked cleanup of successor registrations.
+- `MVP v3` read as Kiro V3 support — `MVP vN` is the product iteration — never imply V3 launching,
+  resume for every store, or hooks are shipped.
 
-Never commit real transcripts, `host.log`, Kiro auth state, child environments, generated
-build output or scanner reports containing sensitive data. Follow `CONTRIBUTING.md`,
-`CODE_OF_CONDUCT.md` and `SECURITY.md`; report vulnerabilities privately through GitHub.
-The project is MIT licensed and independent of Kiro, Amazon, OpenAI and Pi.
+## Docs
 
-## Versioning, releases and installation
+| file | what it is | change it when |
+|---|---|---|
+| `.agents/SPEC.md`, `.agents/PLAN.md`, `.agents/JOURNAL.md` | **git-ignored** live records; never committed, published or packaged | every session, in the primary checkout |
+| `docs/FINDINGS.md` | append-only dated probe evidence; findings beat documentation | every probe that contradicts a claim |
+| `docs/PLAN.md`, `docs/BACKLOG.md` | tracked roadmap **snapshot dated 2026-10-16** (history, not status); tracked next-batch scope, as its own batch | re-baselining; scope change |
+| `docs/journal/*.md` | per-workstream milestone logs, not one log: newest `LIVE-SESSION-NAVIGATION.md` (2026-10-30), then `MULTIPLEXER.md`, `MVP-V3.md` (2026-10-28) | each milestone |
+| `docs/ARCHITECTURE.md` | architecture, IPC frames/limits, feature toggles, upgrade boundary | lifecycle or IPC |
+| `docs/SESSIONS.md` | session unit, native stores, quick-open, resume rules | history/resume |
+| `docs/GENERATION-SUPPORT.md`, `docs/KIRO-INTEGRATION.md` | V2 vs V3 table, unprobed questions; Kiro CLI surface, storage, hooks, env, keys | launch/generation; Kiro integration |
+| `docs/SESSION-NAMES.md`, `docs/WORKSPACES.md`, `docs/RELEASING.md`, `docs/SECURITY-REVIEW.md` | naming precedence and scan bounds; tmux sockets and scroll ownership; release/beta/artifact/installer policy; dated scan evidence and advisory rules | naming; workspaces; release; dependency/security |
+| `docs/RISKS.md`, `docs/DECISIONS.md`, `docs/PI-PARITY.md`, `docs/INCIDENT-2026-10-26-CPU.md`, `docs/MVP.md` | risk register, settled choices, Pi parity map, dated incident, dated MVP review | their own subject; `MVP.md` not edited |
 
-Release Please owns semantic versions, Cargo.toml/Cargo.lock, the version manifest and
-CHANGELOG.md. `feat:` bumps minor; `fix:` bumps patch. Breaking changes bump minor before
-1.0 and major afterward. Docs/chore changes normally do not release the application.
-Do not hand-bump versions, push release tags, add release override footers or upload local
-builds. Merge the generated release PR to publish a tagged GitHub release and binary.
+House doc-contract exemption, recorded 2026-11-25: no `docs/SPEC.md` or `docs/JOURNAL.md` exists
+and the live records are git-ignored under `.agents/`, so the canonical three-document contract does
+not apply here; `docs/MVP.md` and `docs/journal/*` were **not** renamed pending an owner decision.
 
-The release workflow runs checks and a strict RustSec audit, dispatches checks for its
-bot-created PRs, and calls the binary workflow directly on release creation. It uses the
-built-in GITHUB_TOKEN; no personal token or package-registry credentials are required.
-Actions must retain permission to create PRs. Actions are pinned to immutable commits;
-keep PR workflow tokens read-only and grant write permissions only to release jobs.
+## Handoff
 
-The current distribution target is Linux x86_64 GNU, built on Ubuntu 22.04 with a documented
-glibc 2.35 baseline. Each release attaches `kiro-agents-vVERSION-x86_64-unknown-linux-gnu.tar.gz`
-and `SHA256SUMS`. Archives include only the executable, LICENSE, README and CHANGELOG.
-Packaging verifies tag/HEAD/Cargo/binary identity. Do not claim cross-toolchain reproducible
-compiler output. No crates.io/npm package, macOS/Windows/ARM/musl binary is published.
-
-Direct users to GitHub Releases and `README.md` installation instructions: verify the
-checksum, extract, install to `~/.local/bin`, then run `kiro-agents doctor`. Source installation
-uses `cargo install --path . --locked`. For workflow retry and detailed release policy, read
-`docs/RELEASING.md`; use its existing-tag binary workflow instead of inventing a new release.
-
-Branch beta workflows run full checks and audit before packaging, then rerun all
-fake-Kiro PTY scripts against the extracted optimized binary. Betas use the next Cargo
-patch plus `-beta.RUN.ATTEMPT`, recording the exact source SHA without committing version
-changes. A separate publisher executes only trusted default-branch code and validates
-artifacts; never execute branch code with its write token. Fork builds provide artifacts
-only. Betas are prereleases and never replace latest stable. See `docs/RELEASING.md`.
-
-## Security and OSS maintenance
-
-`make audit` checks the complete lockfile with RustSec; CI runs it on changes, releases
-and weekly. Dependabot groups Cargo and Actions version updates into one weekly PR;
-review breaking changes and keep merging explicit. See `CONTRIBUTING.md` for dependency
-squash titles and the separate release PR. Preserve secret scanning,
-push protection, private vulnerability reporting and dependency alerts on GitHub.
-Do not suppress advisories or weaken release checks to ship a binary.
-
-`docs/SECURITY-REVIEW.md` records dated RustSec and Trivy dependency/secret scan evidence
-and reproduction commands. Results are time-bound: rerun for new claims, record scope
-and tool/database versions, and never describe a clean dependency scan as proof that the
-application, operating system or separately installed Kiro CLI has no vulnerabilities.
-Keep detailed policies and changing evidence in their linked documents rather than
-copying scan counts or release versions into these repository instructions.
-
-Session names prefer explicit wrapper overrides, then PID/cwd/fresh-lock-matched native
-Kiro titles, then a bounded first-Prompt extractive title, then project/agent. Never guess
-by newest session in a directory, write native titles, or parse terminal traffic for names.
-`KIRO_AGENTS_AUTO_NAME=auto|kiro|off` controls read-only enrichment at host startup;
-manual names remain available. See `docs/SESSION-NAMES.md` for bounds and compatibility.
-
-Installer changes must retain checksum/archive/version verification and atomic replacement,
-never require sudo or restart hosts. Tests use local mocked release downloads and a temporary
-installation directory; keep the default latest channel stable, with explicit beta selection.
-
-Optional workspaces use real external tmux, which owns panes,
-windows, scrollback and shells. Assemble the backend through WorkspaceFeature; keep
-session-host ownership independent. Never use the default/user tmux server or modify
-~/.tmux.conf; use only the private wrapper-state socket. Closing panes/workspaces must
-not stop managed Kiro sessions. See docs/WORKSPACES.md and docs/journal/MULTIPLEXER.md.
-Workspace tests require tmux 3.2+ and use only temporary private sockets. Exercise
-prefix keys through a real attached PTY client: tmux send-keys bypasses the client's
-prefix parser. Keep the test in make check and the extracted-beta integration suite.
-
-Next-batch plans live in docs/BACKLOG.md: native historical-session resume and local
-fuzzy/full-text session quick-open, with separately verified V2/V3 store adapters.
-These are backlog items only; do not include them in the current multiplexer batch.
-Naming upgrade compatibility: custom labels are shared persistent metadata in private names.json,
-not an RPC requirement or a reason to restart live hosts. Status enrichment must support
-pre-naming hosts. Keep the actual v0.2.0 compatibility regression (synthetic old peer in
-CI), unique unnamed-session labels, and version-independent rendering snapshots. Do not
-claim automatic SQLite TUI titles until ownership mapping is verified; do not guess by cwd.
-
-Attached frontend navigation uses Ctrl+Q alone to return to the dashboard. Preserve
-Kiro's native Ctrl+G crew shortcut and tmux's Ctrl+B prefix. Left Arrow always
-passes through; do not infer editor emptiness from keystrokes or terminal output.
-Navigation belongs to the frontend: relaunch it after installation without
-restarting the host or managed sessions. Test Ctrl+Q through a real PTY with raw
-mode/IXON verification, plus native Ctrl+G and Ctrl+B byte passthrough.
-
-Frontend lifecycle: keep Crossterm's use-dev-tty backend and explicit terminal-hangup
-exit checks; its mio backend can spin inside poll after PTY EOF/EIO. Tests must prove
-closed pane frontends exit, not only that tmux removed a pane. The bounded CPU/PTY/host
-EOF regression runs in make check and against extracted betas. Native title ownership
-may use a bounded, start-time-checked descendant parent chain; main-thread children
-lists alone miss Kiro's runtime-thread launcher chain. See docs/INCIDENT-2026-10-26-CPU.md.
-
-Workspace primary-screen scrolling belongs to tmux's scrollback buffer: wheel and
-PageUp enter/scroll copy mode, not prompt-history or injected page keys. Preserve
-native mouse events for applications that request them and native page keys for
-alternate-screen applications. Test actual viewport movement and no input leakage,
-not only echoed key bytes. Do not change direct native attach passthrough.
-
-Directory selection recursively indexes home (plus cwd outside home) in a cancellable
-background worker. Keep all discovered rows searchable and scrollable; render only
-the viewport. Reuse the private directory-cache for 24 hours, show stale results
-while refreshing, and make Ctrl+R force a rescan. Preserve explicit paths and
-selection-only creation. Discovery excludes hidden/dependency/build trees and
-symlinks, has directory/entry/time bounds, and never requires fd/fzf. Cache tests
-must isolate HOME/state and cover TTL, force, corrupt-file recovery and permissions.
-
-Live session moves are cooperative frontend handoffs, not native history resume or
-host takeover. `m` + confirmation / `attach ID --move` releases only an updated
-frontend through a private token-checked lease/socket, then uses ordinary Attach.
-Never signal or kill a source process, restart the host, or change the host protocol
-for this feature. Preserve exclusive attachment, bounded release waits, old-peer
-refusal, native child PID, and token-checked cleanup of successor registrations.
-
-
-## Local project management
-
-Before starting work, read `.agents/SPEC.md`, `.agents/PLAN.md` and the recent
-entries in `.agents/JOURNAL.md`. These are local working records, not shipped
-product documentation or additional permission grants. Repository rules and the
-user's latest instructions take precedence. Confirm branch/worktree and actual
-code/CI state before relying on a recorded status.
-
-- SPEC.md: agreed scope, behavior, constraints, acceptance criteria and verified
-  decisions. Distinguish requested, implemented, tested, merged and released.
-- PLAN.md: prioritized work items, milestones, dependencies, blockers, owners and
-  worktree/branch/PR pointers. Update before changing direction and after completing
-  a milestone. Keep navigation, lifecycle and other workstreams isolated.
-- JOURNAL.md: dated concise handoffs with changes, decisions, test evidence,
-  failures/blockers and the exact next action. Record relevant user feedback;
-  never store real transcripts, auth, environments or credentials.
-
-Maintain these files as work progresses, including before handing off or ending
-a work session. The coordinator owns shared plan/journal updates; workers report
-results for integration rather than concurrently rewriting the same records.
-In linked worktrees, use the primary checkout's `.agents/` as the canonical local
-record (locate it with `git worktree list`) unless the user explicitly establishes
-separate records. If missing on another machine, bootstrap from tracked docs and
-verified repository state without claiming to have recovered previous local notes.
-
-`.agents/` is ignored and must remain local: never force-add, commit, publish or
-package it. Keep durable public requirements/backlog in `docs/BACKLOG.md`, release
-facts in release docs, and probe contradictions in `docs/FINDINGS.md`. Local notes
-must not become the only record of decisions needed to understand a PR.
+Update `.agents/PLAN.md` and append a dated `.agents/JOURNAL.md` entry: the commit, the evidence
+paths, and what was **not** verified. If those files are missing, put the same content in the PR
+description and say so. Contradicting findings go to `docs/FINDINGS.md` in the same commit. Never
+end a task with a change the repo cannot reproduce, and never stage `.agents/`, transcripts,
+`host.log`, Kiro auth state, child environments or scanner output.
